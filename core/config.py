@@ -14,7 +14,7 @@ DEFAULT_CONFIG = {
     "api_key": "",
     "base_url": "https://api.openai.com/v1",
     "max_tokens": 2048,
-    "temperature": 0.7,
+    "temperature": 0.8,
     "system_prompt": "你是一个有用的终端助手，擅长回答编程和系统管理问题。请用简洁的方式回答。",
 }
 
