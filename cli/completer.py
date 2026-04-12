@@ -8,6 +8,7 @@ COMMANDS = {
     "/model": "切换模型（如 /model gpt-4）",
     "/system": "设置系统提示词",
     "/history": "查看对话历史",
+    "/react": "ReAct 模式（/react <问题>）",
     "/exit": "退出程序",
 }
 

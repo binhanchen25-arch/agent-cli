@@ -8,8 +8,11 @@ from cli.renderer import (
     print_system, print_error, print_config, clear_screen, console,
     exit_fullscreen, set_terminal_title,
 )
+import re
+
 from core.config import load_config, save_config, ensure_dirs, HISTORY_FILE
-from core.llm import stream_from_openai, demo_stream
+from core.llm import OpenAICompatLLM, demo_stream, stream_text
+from core.reagent import ReActAgent
 
 prompt_style = Style.from_dict({
     "prompt": "ansicyan bold",
@@ -20,6 +23,7 @@ class ChatApp:
     def __init__(self):
         ensure_dirs()
         self.config = load_config()
+        self.llm = OpenAICompatLLM(self.config)
         self.messages = []  # 对话历史
         self.use_demo = not self.config.get("api_key")
 
@@ -69,14 +73,27 @@ class ChatApp:
                 print_system(f"当前系统提示词: {self.config.get('system_prompt', '(无)')}")
         elif command == "/history":
             self._show_history()
+        elif command == "/react":
+            if args.strip():
+                self._run_react(args.strip())
+            else:
+                print_system("用法: /react <问题>  （ReAct：推理与工具调用，需配置 API Key）")
         else:
             print_error(f"未知命令: {command}，输入 /help 查看帮助")
 
         return True
 
     def _show_help(self):
-        from core.llm import demo_stream
         render_stream(demo_stream("帮助"))
+
+    def _run_react(self, question: str):
+        """ReAct 模式：多步推理 + 工具调用，结果以 Markdown 面板展示。"""
+        print_user_message(f"/react {question}")
+        agent = ReActAgent("MyCLI", self.llm)
+        answer = agent.run(question)
+        self.messages.append({"role": "user", "content": f"[ReAct] {question}"})
+        self.messages.append({"role": "assistant", "content": answer})
+        render_stream(stream_text(answer))
 
     def _show_history(self):
         if len(self.messages) <= 1:
@@ -97,7 +114,7 @@ class ChatApp:
         if self.use_demo:
             stream = demo_stream(user_input)
         else:
-            stream = stream_from_openai(self.messages, self.config)
+            stream = self.llm.stream(self.messages)
 
         reply = render_stream(stream)
         self.messages.append({"role": "assistant", "content": reply})
@@ -122,7 +139,15 @@ class ChatApp:
                         print_system("再见！👋")
                         break
                 else:
-                    self.chat(user_input)
+                    stripped = user_input.strip()
+                    if stripped.lower() == "react":
+                        print_system("用法: react <问题> 或 /react <问题>")
+                        continue
+                    m = re.match(r"(?i)react\s+(.+)", stripped)
+                    if m:
+                        self._run_react(m.group(1).strip())
+                    else:
+                        self.chat(user_input)
 
             except KeyboardInterrupt:
                 print_system("再见！👋")
