@@ -8,11 +8,10 @@ from cli.renderer import (
     print_system, print_error, print_config, clear_screen, console,
     exit_fullscreen, set_terminal_title,
 )
-import re
 
 from core.config import load_config, save_config, ensure_dirs, HISTORY_FILE
 from core.llm import OpenAICompatLLM, demo_stream, stream_text
-from core.reagent import ReActAgent
+from core.reagent import ReActAgent, ReActChatLLM
 
 prompt_style = Style.from_dict({
     "prompt": "ansicyan bold",
@@ -23,7 +22,8 @@ class ChatApp:
     def __init__(self):
         ensure_dirs()
         self.config = load_config()
-        self.llm = OpenAICompatLLM(self.config)
+        self.base_llm = OpenAICompatLLM(self.config)
+        self.llm = self.base_llm
         self.messages = []  # 对话历史
         self.use_demo = not self.config.get("api_key")
 
@@ -56,6 +56,9 @@ class ChatApp:
             print_system("对话已清空")
         elif command == "/config":
             print_config(self.config)
+        elif command in ("/chat", "/normal"):
+            self.llm = self.base_llm
+            print_system("已切换到普通聊天模式（LLM 直接对话）")
         elif command == "/model":
             if args:
                 self.config["model"] = args
@@ -74,10 +77,12 @@ class ChatApp:
         elif command == "/history":
             self._show_history()
         elif command == "/react":
+            # /react：把当前 llm 切换成 ReAct agent（包装成与 ChatApp 兼容的 stream/invoke 接口）
+            self.llm = ReActChatLLM(ReActAgent("MyCLI", self.base_llm))
             if args.strip():
                 self._run_react(args.strip())
             else:
-                print_system("用法: /react <问题>  （ReAct：推理与工具调用，需配置 API Key）")
+                print_system("已切换到 ReAct 模式（后续输入将走 ReActAgent；用 /chat 切回普通聊天）")
         else:
             print_error(f"未知命令: {command}，输入 /help 查看帮助")
 
@@ -89,7 +94,7 @@ class ChatApp:
     def _run_react(self, question: str):
         """ReAct 模式：多步推理 + 工具调用，结果以 Markdown 面板展示。"""
         print_user_message(f"/react {question}")
-        agent = ReActAgent("MyCLI", self.llm)
+        agent = ReActAgent("MyCLI", self.base_llm)
         answer = agent.run(question)
         self.messages.append({"role": "user", "content": f"[ReAct] {question}"})
         self.messages.append({"role": "assistant", "content": answer})
@@ -141,13 +146,9 @@ class ChatApp:
                 else:
                     stripped = user_input.strip()
                     if stripped.lower() == "react":
-                        print_system("用法: react <问题> 或 /react <问题>")
+                        print_system("请使用 /react 进入 ReAct 模式，或 /react <问题> 立即执行一次")
                         continue
-                    m = re.match(r"(?i)react\s+(.+)", stripped)
-                    if m:
-                        self._run_react(m.group(1).strip())
-                    else:
-                        self.chat(user_input)
+                    self.chat(user_input)
 
             except KeyboardInterrupt:
                 print_system("再见！👋")

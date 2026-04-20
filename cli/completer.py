@@ -5,10 +5,12 @@ COMMANDS = {
     "/help": "显示帮助信息",
     "/clear": "清空对话历史",
     "/config": "查看当前配置",
+    "/chat": "切回普通聊天模式（LLM 直接对话）",
+    "/normal": "切回普通聊天模式（同 /chat）",
     "/model": "切换模型（如 /model gpt-4）",
     "/system": "设置系统提示词",
     "/history": "查看对话历史",
-    "/react": "ReAct 模式（/react <问题>）",
+    "/react": "切换到 ReAct 模式（/react 或 /react <问题>）",
     "/exit": "退出程序",
 }
 
