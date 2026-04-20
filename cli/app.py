@@ -146,7 +146,7 @@ class ChatApp:
                 else:
                     stripped = user_input.strip()
                     if stripped.lower() == "react":
-                        print_system("请使用 /react 进入 ReAct 模式，或 /react <问题> 立即执行一次")
+                        print_system("请使用 /react 进入 ReAct 模式")
                         continue
                     self.chat(user_input)
 
