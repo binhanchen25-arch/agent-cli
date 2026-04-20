@@ -12,6 +12,7 @@ from cli.renderer import (
 from core.config import load_config, save_config, ensure_dirs, HISTORY_FILE
 from core.llm import OpenAICompatLLM, demo_stream, stream_text
 from core.reagent import ReActAgent, ReActChatLLM
+from tools.builtin import set_allow_all_windows_cmd
 
 prompt_style = Style.from_dict({
     "prompt": "ansicyan bold",
@@ -56,6 +57,16 @@ class ChatApp:
             print_system("对话已清空")
         elif command == "/config":
             print_config(self.config)
+        elif command == "/allow":
+            allow_arg = args.strip().lower()
+            if allow_arg == "all":
+                set_allow_all_windows_cmd(True)
+                print_system("已开启 allow all：命令执行将跳过 Yes/No 确认。")
+            elif allow_arg in ("off", "none", "reset"):
+                set_allow_all_windows_cmd(False)
+                print_system("已关闭 allow all：命令执行前会再次弹出 Yes/No 确认。")
+            else:
+                print_system("用法: /allow all  （可选关闭: /allow off）")
         elif command in ("/chat", "/normal"):
             self.llm = self.base_llm
             print_system("已切换到普通聊天模式（LLM 直接对话）")

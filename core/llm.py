@@ -82,7 +82,7 @@ def stream_text(text: str) -> Generator[str, None, None]:
 
 DEMO_RESPONSES = {
     "你好": "你好！👋 我是你的终端助手，有什么可以帮你的？\n\n我可以帮你：\n- 🔧 解答编程问题\n- 📁 生成代码片段\n- 💡 提供技术方案建议\n\n直接输入你的问题就好！",
-    "帮助": "## 📖 使用帮助\n\n| 命令 | 说明 |\n|------|------|\n| `/help` | 显示帮助信息 |\n| `/clear` | 清空对话历史 |\n| `/config` | 查看当前配置 |\n| `/model <name>` | 切换模型 |\n| `/react` | 切换到 ReAct 模式（之后输入会走 Agent；需 API Key） |\n| `/react <问题>` | 切到 ReAct 并立即执行一次 |\n| `/chat` 或 `/normal` | 切回普通聊天模式 |\n| `/exit` | 退出程序 |\n\n直接输入文字即可开始对话。",
+    "帮助": "## 📖 使用帮助\n\n| 命令 | 说明 |\n|------|------|\n| `/help` | 显示帮助信息 |\n| `/clear` | 清空对话历史 |\n| `/config` | 查看当前配置 |\n| `/model <name>` | 切换模型 |\n| `/react` | 切换到 ReAct 模式（之后输入会走 Agent；需 API Key） |\n| `/react <问题>` | 切到 ReAct 并立即执行一次 |\n| `/allow all` | 允许命令工具直接执行（跳过 Yes/No） |\n| `/allow off` | 关闭直通执行，恢复 Yes/No 确认 |\n| `/chat` 或 `/normal` | 切回普通聊天模式 |\n| `/exit` | 退出程序 |\n\n直接输入文字即可开始对话。",
 }
 
 
