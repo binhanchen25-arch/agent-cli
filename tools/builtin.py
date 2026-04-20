@@ -8,7 +8,6 @@ import subprocess
 from datetime import datetime
 from typing import Any, Dict, List
 
-from prompt_toolkit.shortcuts import button_dialog
 from rich.panel import Panel
 
 from cli.renderer import console
@@ -27,6 +26,19 @@ def set_allow_all_windows_cmd(enabled: bool) -> None:
 def get_allow_all_windows_cmd() -> bool:
     """读取是否跳过 windows_cmd 的人工确认。"""
     return _ALLOW_ALL_WINDOWS_CMD
+
+
+def _confirm_in_cli(command: str) -> bool:
+    """纯命令行确认：输入 yes/y 执行，no/n 取消。"""
+    while True:
+        answer = console.input(
+            f"[bold yellow]确认执行该命令？[/bold yellow] 输入 [green]yes/y[/green] 或 [red]no/n[/red]\n> "
+        ).strip().lower()
+        if answer in ("yes", "y"):
+            return True
+        if answer in ("no", "n"):
+            return False
+        console.print("请输入 yes/y 或 no/n。", style="error")
 
 
 class EchoTool(Tool):
@@ -78,7 +90,7 @@ class WindowsCmdTool(Tool):
             name="windows_cmd",
             description=(
                 "在本机终端执行命令：Windows 使用 cmd.exe，macOS/Linux 使用 bash。"
-                "每次执行前会在 CLI 渲染确认框并提供 Yes/No 按钮；"
+                "每次执行前会在 CLI 显示确认提示并要求输入 yes/no；"
                 "若用户执行 `/allow all`，则跳过确认直接执行。"
             ),
             expandable=False,
@@ -119,11 +131,7 @@ class WindowsCmdTool(Tool):
         )
 
         if not get_allow_all_windows_cmd():
-            approved = button_dialog(
-                title="命令执行确认",
-                text=f"将要执行以下命令：\n\n{command}\n\n是否继续？",
-                buttons=[("Yes", True), ("No", False)],
-            ).run()
+            approved = _confirm_in_cli(command)
             if not approved:
                 return "用户拒绝执行命令。"
 
