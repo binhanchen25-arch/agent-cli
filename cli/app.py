@@ -59,14 +59,14 @@ class ChatApp:
             print_config(self.config)
         elif command == "/allow":
             allow_arg = args.strip().lower()
-            if allow_arg == "all":
+            if not allow_arg or allow_arg == "all":
                 set_allow_all_windows_cmd(True)
-                print_system("已开启 allow all：命令执行将跳过 Yes/No 确认。")
+                print_system("已开启 allow：命令执行将跳过 Yes/No 确认。")
             elif allow_arg in ("off", "none", "reset"):
                 set_allow_all_windows_cmd(False)
-                print_system("已关闭 allow all：命令执行前会再次弹出 Yes/No 确认。")
+                print_system("已关闭 allow：命令执行前会再次弹出 Yes/No 确认。")
             else:
-                print_system("用法: /allow all  （可选关闭: /allow off）")
+                print_system("用法: /allow  （可选: /allow all, /allow off）")
         elif command in ("/chat", "/normal"):
             self.llm = self.base_llm
             print_system("已切换到普通聊天模式（LLM 直接对话）")

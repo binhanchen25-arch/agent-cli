@@ -24,7 +24,7 @@ class ChatAppTests(unittest.TestCase):
             "api_key": "test-key",
             "base_url": "https://example.com/v1",
             "max_tokens": 512,
-            "temperature": 0.1,
+            "temperature": 0.2,
             "system_prompt": "system prompt",
         }
 
@@ -43,7 +43,7 @@ class ChatAppTests(unittest.TestCase):
         self.p_prompt_session.start()
         self.p_file_history.start()
         self.p_completer.start()
-        
+
         self.addCleanup(self.p_ensure_dirs.stop)
         self.addCleanup(self.p_load_config.stop)
         self.addCleanup(self.p_openai_compat.stop)
@@ -64,10 +64,11 @@ class ChatAppTests(unittest.TestCase):
 
     def test_allow_all_and_allow_off_toggle_execution_guard(self):
         with patch("cli.app.set_allow_all_windows_cmd") as mock_set_allow:
+            self.assertTrue(self.app.handle_command("/allow"))
             self.assertTrue(self.app.handle_command("/allow all"))
             self.assertTrue(self.app.handle_command("/allow off"))
 
-        self.assertEqual(mock_set_allow.call_count, 2)
+        self.assertEqual(mock_set_allow.call_count, 3)
         mock_set_allow.assert_any_call(True)
         mock_set_allow.assert_any_call(False)
 
