@@ -43,6 +43,7 @@ class ChatAppTests(unittest.TestCase):
         self.p_prompt_session.start()
         self.p_file_history.start()
         self.p_completer.start()
+        
         self.addCleanup(self.p_ensure_dirs.stop)
         self.addCleanup(self.p_load_config.stop)
         self.addCleanup(self.p_openai_compat.stop)
