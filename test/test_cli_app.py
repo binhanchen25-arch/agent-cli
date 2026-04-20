@@ -24,7 +24,7 @@ class ChatAppTests(unittest.TestCase):
             "api_key": "test-key",
             "base_url": "https://example.com/v1",
             "max_tokens": 512,
-            "temperature": 0.2,
+            "temperature": 0.8,
             "system_prompt": "system prompt",
         }
 
