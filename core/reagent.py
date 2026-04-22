@@ -115,7 +115,7 @@ class ReActAgent:
                 self.current_history.append(f"Action: {action}")
                 self.current_history.append(f"Observation: {observation}")
 
-        return "抱歉，在限定步数内未能得到明确结论。"
+        return "抱歉，未能得到明确结论。"
 
     def _finish_on_refused(self, question: str) -> str:
         """用户拒绝工具执行后，将完整上下文交给 LLM 生成最终回复。"""
