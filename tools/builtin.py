@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import fnmatch
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List
 
 from rich.panel import Panel
@@ -159,7 +162,241 @@ class WindowsCmdTool(Tool):
         return f"exit_code={completed.returncode}\nstdout:\n{stdout}\nstderr:\n{stderr}"
 
 
+class TreeTool(Tool):
+    """列出目录结构树。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="tree",
+            description="列出指定目录的文件结构树。参数为目录路径，可选用 | 分隔最大深度，如 ./src|3。默认深度 2。",
+            expandable=False,
+        )
+
+    def get_parameters(self) -> List[ToolParameter]:
+        return [
+            ToolParameter(name="input", type="string", description="目录路径，可用 | 分隔深度，如 ./src|3", required=True),
+        ]
+
+    def run(self, parameters: Dict[str, Any]) -> str:
+        raw = str(parameters.get("input", ".")).strip()
+        parts = raw.split("|", 1)
+        directory = parts[0].strip() or "."
+        max_depth = 2
+        if len(parts) > 1:
+            try:
+                max_depth = int(parts[1].strip())
+            except ValueError:
+                pass
+
+        directory = os.path.abspath(directory)
+        if not os.path.isdir(directory):
+            return f"目录不存在: {directory}"
+
+        lines: List[str] = [directory]
+        max_items = 500
+
+        def _walk(dir_path: str, prefix: str, depth: int):
+            nonlocal max_items
+            if depth > max_depth or max_items <= 0:
+                return
+            try:
+                entries = sorted(os.listdir(dir_path))
+            except PermissionError:
+                lines.append(f"{prefix}[权限不足]")
+                return
+
+            # 过滤隐藏文件和常见无关目录
+            skip = {".git", "__pycache__", "node_modules", ".venv", ".idea", ".DS_Store"}
+            entries = [e for e in entries if e not in skip]
+
+            for i, name in enumerate(entries):
+                if max_items <= 0:
+                    lines.append(f"{prefix}... (已截断)")
+                    return
+                max_items -= 1
+                full = os.path.join(dir_path, name)
+                is_last = (i == len(entries) - 1)
+                connector = "└── " if is_last else "├── "
+                if os.path.isdir(full):
+                    lines.append(f"{prefix}{connector}{name}/")
+                    extension = "    " if is_last else "│   "
+                    _walk(full, prefix + extension, depth + 1)
+                else:
+                    lines.append(f"{prefix}{connector}{name}")
+
+        _walk(directory, "", 1)
+        return "\n".join(lines)
+
+
+class GlobTool(Tool):
+    """按模式匹配查找文件。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="glob",
+            description="按 glob 模式查找文件。参数为 pattern，如 **/*.py 或 src/**/*.js。在当前目录下搜索。",
+            expandable=False,
+        )
+
+    def get_parameters(self) -> List[ToolParameter]:
+        return [
+            ToolParameter(name="pattern", type="string", description="glob 模式，如 **/*.py", required=True),
+        ]
+
+    def run(self, parameters: Dict[str, Any]) -> str:
+        pattern = str(parameters.get("pattern", "")).strip()
+        if not pattern:
+            return "请提供 glob 模式，如 **/*.py"
+
+        base = Path(".")
+        matches = sorted(str(p) for p in base.glob(pattern) if not any(
+            part.startswith(".") or part in ("__pycache__", "node_modules")
+            for part in p.parts
+        ))
+
+        if not matches:
+            return f"未找到匹配 `{pattern}` 的文件"
+
+        limit = 50
+        result = matches[:limit]
+        out = "\n".join(result)
+        if len(matches) > limit:
+            out += f"\n... 共 {len(matches)} 个结果，仅显示前 {limit} 个"
+        return out
+
+
+class GrepTool(Tool):
+    """在文件中搜索文本内容。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="grep",
+            description=(
+                "在文件中搜索文本或正则表达式。"
+                "参数格式: 搜索词 或 搜索词|glob模式，如 import|**/*.py。"
+                "返回匹配的文件名和行号。"
+            ),
+            expandable=False,
+        )
+
+    def get_parameters(self) -> List[ToolParameter]:
+        return [
+            ToolParameter(name="input", type="string", description="搜索词，可用 | 分隔 glob 过滤，如 import|**/*.py", required=True),
+        ]
+
+    def run(self, parameters: Dict[str, Any]) -> str:
+        raw = str(parameters.get("input", "")).strip()
+        if not raw:
+            return "请提供搜索关键词"
+
+        parts = raw.split("|", 1)
+        keyword = parts[0].strip()
+        file_pattern = parts[1].strip() if len(parts) > 1 else "**/*"
+
+        if not keyword:
+            return "搜索关键词不能为空"
+
+        try:
+            pattern = re.compile(keyword, re.IGNORECASE)
+        except re.error:
+            pattern = re.compile(re.escape(keyword), re.IGNORECASE)
+
+        base = Path(".")
+        skip_dirs = {".git", "__pycache__", "node_modules", ".venv", ".idea"}
+        results: List[str] = []
+        max_results = 30
+
+        for filepath in sorted(base.glob(file_pattern)):
+            if len(results) >= max_results:
+                break
+            if not filepath.is_file():
+                continue
+            if any(part in skip_dirs for part in filepath.parts):
+                continue
+            try:
+                text = filepath.read_text(encoding="utf-8", errors="ignore")
+                for line_num, line in enumerate(text.splitlines(), 1):
+                    if pattern.search(line):
+                        results.append(f"{filepath}:{line_num}: {line.strip()[:120]}")
+                        if len(results) >= max_results:
+                            break
+            except (OSError, UnicodeDecodeError):
+                continue
+
+        if not results:
+            return f"未找到匹配 `{keyword}` 的内容"
+
+        out = "\n".join(results)
+        if len(results) >= max_results:
+            out += f"\n... 结果已截断（最多 {max_results} 条）"
+        return out
+
+
+class ViewTool(Tool):
+    """查看文件内容（支持行范围）。"""
+
+    def __init__(self) -> None:
+        super().__init__(
+            name="view",
+            description=(
+                "查看文件内容。参数为文件路径，可用 | 指定行范围，如 main.py|1-30。"
+                "不指定范围则返回前 200 行。"
+            ),
+            expandable=False,
+        )
+
+    def get_parameters(self) -> List[ToolParameter]:
+        return [
+            ToolParameter(name="input", type="string", description="文件路径，可用 | 分隔行范围，如 src/main.py|10-50", required=True),
+        ]
+
+    def run(self, parameters: Dict[str, Any]) -> str:
+        raw = str(parameters.get("input", "")).strip()
+        if not raw:
+            return "请提供文件路径"
+
+        parts = raw.split("|", 1)
+        filepath = parts[0].strip()
+        start_line, end_line = 1, 200
+
+        if len(parts) > 1:
+            range_str = parts[1].strip()
+            m = re.match(r"(\d+)\s*-\s*(\d+)", range_str)
+            if m:
+                start_line = max(1, int(m.group(1)))
+                end_line = int(m.group(2))
+            else:
+                try:
+                    start_line = max(1, int(range_str))
+                    end_line = start_line + 199
+                except ValueError:
+                    pass
+
+        if not os.path.isfile(filepath):
+            return f"文件不存在: {filepath}"
+
+        try:
+            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+                all_lines = f.readlines()
+        except OSError as e:
+            return f"读取失败: {e}"
+
+        total = len(all_lines)
+        end_line = min(end_line, total)
+
+        if start_line > total:
+            return f"文件共 {total} 行，起始行 {start_line} 超出范围"
+
+        selected = all_lines[start_line - 1 : end_line]
+        numbered = [f"{start_line + i:4d} | {line.rstrip()}" for i, line in enumerate(selected)]
+        header = f"📄 {filepath}  (行 {start_line}-{end_line}，共 {total} 行)"
+        return header + "\n" + "\n".join(numbered)
+
+
 def default_tool_registry() -> ToolRegistry:
     reg = ToolRegistry()
-    reg.register_many([EchoTool(), NowTool(), WindowsCmdTool()])
+    reg.register_many([
+        EchoTool(), NowTool(), WindowsCmdTool(),
+        TreeTool(), GlobTool(), GrepTool(), ViewTool(),
+    ])
     return reg
