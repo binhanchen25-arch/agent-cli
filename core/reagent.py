@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Generator, List, Optional, Tuple
 if TYPE_CHECKING:
     from core.llm import OpenAICompatLLM
 
+from tools.base import UserRefusedError
 from tools.builtin import default_tool_registry
 from tools.registry import ToolRegistry
 
@@ -61,61 +62,76 @@ class ReActAgent:
 
     def run(self, question: str) -> str:
         """执行 ReAct 循环，返回最终答案字符串。"""
+        from cli.renderer import console
+
         self.current_history = []
         if not self.llm.config.get("api_key"):
             return "ReAct 模式需要配置 API Key（环境变量 OPENAI_API_KEY 或配置文件中的 api_key）。"
 
-        print(f"\n🤖 {self.name} | ReAct 任务: {question}")
+        with console.status("🤔 Thinking…", spinner="dots") as status:
+            for step in range(1, self.max_steps + 1):
+                status.update(f"🤔 Thinking… (step {step}/{self.max_steps})")
+                tools_desc = self.tool_registry.get_tools_description()
+                history_str = "\n".join(self.current_history) if self.current_history else "（尚无）"
+                prompt = self.prompt_template.format(
+                    tools=tools_desc,
+                    question=question,
+                    history=history_str,
+                )
+                messages: List[dict] = []
+                sp = self.llm.config.get("system_prompt")
+                if sp:
+                    messages.append({"role": "system", "content": sp})
+                messages.append({"role": "user", "content": prompt})
 
-        for step in range(1, self.max_steps + 1):
-            print(f"\n--- 第 {step} 步 ---")
-            tools_desc = self.tool_registry.get_tools_description()
-            history_str = "\n".join(self.current_history) if self.current_history else "（尚无）"
-            prompt = self.prompt_template.format(
-                tools=tools_desc,
-                question=question,
-                history=history_str,
-            )
-            messages: List[dict] = []
-            sp = self.llm.config.get("system_prompt")
-            if sp:
-                messages.append({"role": "system", "content": sp})
-            messages.append({"role": "user", "content": prompt})
+                response_text = self.llm.invoke(messages)
+                if not response_text:
+                    break
 
-            response_text = self.llm.invoke(messages)
-            if not response_text:
-                print("❌ LLM 未返回有效内容。")
-                break
+                thought, action = self._parse_output(response_text)
+                if not action:
+                    break
 
-            thought, action = self._parse_output(response_text)
-            if thought:
-                print(f"🤔 Thought: {thought}")
-            if not action:
-                print("⚠️ 未能解析 Action，结束。")
-                break
+                if action.startswith("Finish"):
+                    return self._parse_action_input(action)
 
-            if action.startswith("Finish"):
-                final_answer = self._parse_action_input(action)
-                print(f"🎉 Finish: {final_answer}")
-                return final_answer
+                tool_name, tool_input = self._parse_action(action)
+                if not tool_name or tool_input is None:
+                    self.current_history.append(f"Action: {action}")
+                    self.current_history.append(
+                        "Observation: Action 格式无效，应为 工具名[参数] 或 Finish[结论]。"
+                    )
+                    continue
 
-            tool_name, tool_input = self._parse_action(action)
-            if not tool_name or tool_input is None:
-                obs = "Observation: Action 格式无效，应为 工具名[参数] 或 Finish[结论]。"
-                print(f"👀 {obs}")
+                status.update(f"🔧 Running tool: {tool_name}…")
+                try:
+                    observation = self.tool_registry.execute_tool(tool_name, tool_input)
+                except UserRefusedError as e:
+                    self.current_history.append(f"Action: {action}")
+                    self.current_history.append(f"Observation: {e.detail}")
+                    status.update("🤔 Thinking…")
+                    return self._finish_on_refused(question)
+
                 self.current_history.append(f"Action: {action}")
-                self.current_history.append(obs)
-                continue
+                self.current_history.append(f"Observation: {observation}")
 
-            print(f"🎬 Action: {tool_name}[{tool_input}]")
-            observation = self.tool_registry.execute_tool(tool_name, tool_input)
-            print(f"👀 Observation: {observation}")
-            self.current_history.append(f"Action: {action}")
-            self.current_history.append(f"Observation: {observation}")
+        return "抱歉，在限定步数内未能得到明确结论。"
 
-        fallback = "抱歉，在限定步数内未能得到明确结论。"
-        print(f"⏰ {fallback}")
-        return fallback
+    def _finish_on_refused(self, question: str) -> str:
+        """用户拒绝工具执行后，将完整上下文交给 LLM 生成最终回复。"""
+        history_str = "\n".join(self.current_history)
+        prompt = (
+            f"用户提出了问题：{question}\n\n"
+            f"## 执行历史\n{history_str}\n\n"
+            "用户拒绝了上述命令的执行。请根据已有信息给出你能提供的最佳回答，"
+            "或者告知用户如果不执行该命令你无法完成任务的原因。"
+        )
+        messages: List[dict] = []
+        sp = self.llm.config.get("system_prompt")
+        if sp:
+            messages.append({"role": "system", "content": sp})
+        messages.append({"role": "user", "content": prompt})
+        return self.llm.invoke(messages)
 
     def _parse_output(self, text: str) -> Tuple[Optional[str], Optional[str]]:
         thought_m = re.search(r"Thought:\s*(.+?)(?=\n\s*Action:|\Z)", text, re.DOTALL | re.IGNORECASE)

@@ -9,6 +9,16 @@ from typing import Any, Callable, Dict, List, Optional, get_type_hints
 
 from pydantic import BaseModel, ConfigDict
 
+
+class UserRefusedError(Exception):
+    """用户拒绝执行工具操作时抛出，用于通知 Agent 暂停当前循环。"""
+
+    def __init__(self, tool_name: str, detail: str = ""):
+        self.tool_name = tool_name
+        self.detail = detail
+        super().__init__(f"用户拒绝执行工具 {tool_name}: {detail}")
+
+
 def tool_action(name: Optional[str] = None, description: Optional[str] = None):
     """装饰器：将类方法标记为可展开子工具（expandable=True 时由 get_expanded_tools 收集）。"""
 

@@ -1,71 +1,64 @@
 import time
-from typing import Generator, List
+from typing import Generator, List, Optional
 
 
 class OpenAICompatLLM:
     """
     与 ChatApp 共享的 config 引用，统一封装「非流式 / 流式」调用。
     ReAct 等 Agent 通过 invoke() 使用同一套端点与模型配置。
+    内部复用同一个 OpenAI client 实例，配置变更时自动重建。
     """
 
     def __init__(self, config: dict) -> None:
         self.config = config
+        self._client: Optional[object] = None
+        self._client_key: Optional[tuple] = None
+
+    def _get_client(self):
+        """获取或创建 OpenAI client，仅在 api_key/base_url 变更时重建。"""
+        from openai import OpenAI
+
+        key = (self.config["api_key"], self.config["base_url"])
+        if self._client is None or self._client_key != key:
+            self._client = OpenAI(api_key=key[0], base_url=key[1])
+            self._client_key = key
+        return self._client
 
     def invoke(self, messages: List[dict]) -> str:
-        return chat_completion(messages, self.config)
+        try:
+            client = self._get_client()
+            response = client.chat.completions.create(
+                model=self.config["model"],
+                messages=messages,
+                max_tokens=self.config["max_tokens"],
+                temperature=self.config["temperature"],
+                stream=False,
+            )
+            choice = response.choices[0].message
+            return (choice.content or "").strip()
+        except ImportError:
+            return "（未安装 openai 库，无法调用 API）"
+        except Exception as e:
+            return f"❌ API 错误: {e}"
 
     def stream(self, messages: List[dict]) -> Generator[str, None, None]:
-        return stream_from_openai(messages, self.config)
-
-
-def chat_completion(messages: List[dict], config: dict) -> str:
-    """非流式调用 OpenAI 兼容 API，返回完整文本（供 ReAct 等需要整段解析的场景）"""
-    try:
-        from openai import OpenAI
-
-        client = OpenAI(
-            api_key=config["api_key"],
-            base_url=config["base_url"],
-        )
-        response = client.chat.completions.create(
-            model=config["model"],
-            messages=messages,
-            max_tokens=config["max_tokens"],
-            temperature=config["temperature"],
-            stream=False,
-        )
-        choice = response.choices[0].message
-        return (choice.content or "").strip()
-    except ImportError:
-        return "（未安装 openai 库，无法调用 API）"
-    except Exception as e:
-        return f"❌ API 错误: {e}"
-
-
-def stream_from_openai(messages: list, config: dict) -> Generator[str, None, None]:
-    """调用 OpenAI 兼容 API，流式返回文本"""
-    try:
-        from openai import OpenAI
-
-        client = OpenAI(
-            api_key=config["api_key"],
-            base_url=config["base_url"],
-        )
-        response = client.chat.completions.create(
-            model=config["model"],
-            messages=messages,
-            max_tokens=config["max_tokens"],
-            temperature=config["temperature"],
-            stream=True,
-        )
-        for chunk in response:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-    except ImportError:
-        yield from mock_stream("（未安装 openai 库，使用模拟回复）\n\n")
-        yield from mock_stream(f"你说的是: {messages[-1]['content']}")
-    except Exception as e:
-        yield f"\n❌ API 错误: {e}"
+        try:
+            client = self._get_client()
+            response = client.chat.completions.create(
+                model=self.config["model"],
+                messages=messages,
+                max_tokens=self.config["max_tokens"],
+                temperature=self.config["temperature"],
+                stream=True,
+            )
+            for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        except ImportError:
+            yield from mock_stream("（未安装 openai 库，使用模拟回复）\n\n")
+            yield from mock_stream(f"你说的是: {messages[-1]['content']}")
+        except Exception as e:
+            yield f"\n❌ API 错误: {e}"
 
 
 def mock_stream(text: str) -> Generator[str, None, None]:

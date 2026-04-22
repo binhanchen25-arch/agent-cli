@@ -11,7 +11,7 @@ from typing import Any, Dict, List
 from rich.panel import Panel
 
 from cli.renderer import console
-from tools.base import Tool, ToolParameter
+from tools.base import Tool, ToolParameter, UserRefusedError
 from tools.registry import ToolRegistry
 
 _ALLOW_ALL_WINDOWS_CMD = False
@@ -133,7 +133,7 @@ class WindowsCmdTool(Tool):
         if not get_allow_all_windows_cmd():
             approved = _confirm_in_cli(command)
             if not approved:
-                return "用户拒绝执行命令。"
+                raise UserRefusedError("windows_cmd", f"用户拒绝执行命令: {command}")
 
         try:
             completed = subprocess.run(

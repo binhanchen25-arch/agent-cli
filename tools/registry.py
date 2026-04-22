@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from tools.base import Tool
+from tools.base import Tool, UserRefusedError
 
 
 class ToolRegistry:
@@ -78,5 +78,7 @@ class ToolRegistry:
             )
         try:
             return tool.run(parameters)
+        except UserRefusedError:
+            raise
         except Exception as e:
             return f"工具执行错误: {e}"
