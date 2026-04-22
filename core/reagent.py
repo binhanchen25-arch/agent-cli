@@ -50,7 +50,7 @@ class ReActAgent:
         name: str,
         llm: OpenAICompatLLM,
         tool_registry: Optional[ToolRegistry] = None,
-        max_steps: int = 8,
+        max_steps: int = 20,
         custom_prompt: Optional[str] = None,
     ) -> None:
         self.name = name
