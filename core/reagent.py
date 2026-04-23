@@ -1,8 +1,8 @@
-"""ReAct Agent — 推理与行动结合，适用于本终端项目的 dict 配置与 OpenAI 兼容 API。"""
+"""Agent 模块 — 基于 OpenAI Function Calling 的智能体，支持并行工具调用。"""
 from __future__ import annotations
 
-import re
-from typing import TYPE_CHECKING, Generator, List, Optional, Tuple
+import json
+from typing import TYPE_CHECKING, Generator, List, Optional
 
 if TYPE_CHECKING:
     from core.llm import OpenAICompatLLM
@@ -11,38 +11,16 @@ from tools.base import UserRefusedError
 from tools.builtin import default_tool_registry
 from tools.registry import ToolRegistry
 
-DEFAULT_REACT_PROMPT = """你是一个具备推理和行动能力的 AI 助手。你可以通过思考分析问题，然后调用合适的工具来获取信息，最终给出准确的答案。
-
-## 可用工具
-{tools}
-
-## 工作流程
-请严格按照以下格式进行回应，每次只能执行一个步骤：
-
-Thought: 分析问题，确定需要什么信息，制定研究策略。
-Action: 选择合适的工具获取信息，格式为：
-- `{{tool_name}}[{{tool_input}}]`：调用工具获取信息。
-- `Finish[最终结论]`：当你有足够信息得出结论时。
-
-## 重要提醒
-1. 每次回应必须包含 Thought 和 Action 两部分
-2. 工具调用的格式必须严格遵循：工具名[参数]
-3. 只有当你确信有足够信息回答问题时，才使用 Finish
-4. 如果工具返回的信息不够，继续使用其他工具或相同工具的不同参数
-
-## 当前任务
-**Question:** {question}
-
-## 执行历史
-{history}
-
-现在开始你的推理和行动："""
+AGENT_SYSTEM_PROMPT = """你是一个强大的 AI 助手，可以调用工具来完成任务。
+当你需要获取信息时，请使用可用的工具。你可以在一次回复中调用多个工具来并行获取信息。
+当你有足够信息回答用户问题时，直接用文本回复，不要调用工具。
+阅读代码时，先用 tree/glob 了解结构，再用 grep 定位关键词，最后用 view 读取相关片段。不要试图一次读完整个文件。"""
 
 
 class ReActAgent:
     """
-    ReAct（Reasoning + Acting）智能体：多步 Thought → Action → Observation，直到 Finish。
-    依赖 `OpenAICompatLLM.invoke()`，与 ChatApp 中持有的 llm 为同一实例。
+    基于 OpenAI Function Calling 的智能体：LLM 可一次返回多个 tool_calls，
+    按序执行后将结果一起喂回，大幅减少对话轮次。
     """
 
     def __init__(
@@ -57,111 +35,89 @@ class ReActAgent:
         self.llm = llm
         self.tool_registry = tool_registry or default_tool_registry()
         self.max_steps = max_steps
-        self.prompt_template = custom_prompt or DEFAULT_REACT_PROMPT
-        self.current_history: List[str] = []
+        self.system_prompt = custom_prompt or AGENT_SYSTEM_PROMPT
 
     def run(self, question: str) -> str:
-        """执行 ReAct 循环，返回最终答案字符串。"""
+        """执行 Function Calling 循环，返回最终文本回复。"""
         from cli.renderer import console
 
-        self.current_history = []
         if not self.llm.config.get("api_key"):
-            return "ReAct 模式需要配置 API Key（环境变量 OPENAI_API_KEY 或配置文件中的 api_key）。"
+            return "Agent 模式需要配置 API Key（环境变量 OPENAI_API_KEY 或配置文件中的 api_key）。"
+
+        messages: List[dict] = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": question},
+        ]
+        tools_schema = self.tool_registry.get_openai_tools_schema()
+        total_calls = 0
 
         with console.status("🤔 Thinking…", spinner="dots") as status:
             for step in range(1, self.max_steps + 1):
                 status.update(f"🤔 Thinking… (step {step}/{self.max_steps})")
-                tools_desc = self.tool_registry.get_tools_description()
-                history_str = "\n".join(self.current_history) if self.current_history else "（尚无）"
-                prompt = self.prompt_template.format(
-                    tools=tools_desc,
-                    question=question,
-                    history=history_str,
-                )
-                messages: List[dict] = []
-                sp = self.llm.config.get("system_prompt")
-                if sp:
-                    messages.append({"role": "system", "content": sp})
-                messages.append({"role": "user", "content": prompt})
 
-                response_text = self.llm.invoke(messages)
-                if not response_text:
-                    break
+                resp = self.llm.invoke_with_tools(messages, tools_schema)
 
-                thought, action = self._parse_output(response_text)
-                if not action:
-                    break
+                # 没有工具调用 → LLM 直接给出最终回答
+                if not resp.tool_calls:
+                    return resp.content or "（无回复）"
 
-                if action.startswith("Finish"):
-                    return self._parse_action_input(action)
+                # 将带 tool_calls 的 assistant 消息追加到历史
+                assistant_msg: dict = {
+                    "role": "assistant",
+                    "content": resp.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                            },
+                        }
+                        for tc in resp.tool_calls
+                    ],
+                }
+                messages.append(assistant_msg)
 
-                tool_name, tool_input = self._parse_action(action)
-                if not tool_name or tool_input is None:
-                    self.current_history.append(f"Action: {action}")
-                    self.current_history.append(
-                        "Observation: Action 格式无效，应为 工具名[参数] 或 Finish[结论]。"
-                    )
-                    continue
+                # 按序执行每个 tool call，结果作为 tool 消息追加
+                for tc in resp.tool_calls:
+                    total_calls += 1
+                    status.update(f"🔧 Running: {tc.name} ({total_calls} calls)")
 
-                status.update(f"🔧 Running tool: {tool_name}…")
-                try:
-                    observation = self.tool_registry.execute_tool(tool_name, tool_input)
-                except UserRefusedError as e:
-                    self.current_history.append(f"Action: {action}")
-                    self.current_history.append(f"Observation: {e.detail}")
-                    status.update("🤔 Thinking…")
-                    return self._finish_on_refused(question)
+                    try:
+                        result = self.tool_registry.execute_tool_by_params(
+                            tc.name, tc.arguments
+                        )
+                    except UserRefusedError as e:
+                        # 用户拒绝 → 记录拒绝结果并让 LLM 基于已有信息回复
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": f"用户拒绝: {e.detail}",
+                        })
+                        return self._finish_on_refused(messages)
 
-                self.current_history.append(f"Action: {action}")
-                self.current_history.append(f"Observation: {observation}")
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    })
 
-        return "抱歉，未能得到明确结论。"
+        return "抱歉，在限定步数内未能完成任务。"
 
-    def _finish_on_refused(self, question: str) -> str:
-        """用户拒绝工具执行后，将完整上下文交给 LLM 生成最终回复。"""
-        history_str = "\n".join(self.current_history)
-        prompt = (
-            f"用户提出了问题：{question}\n\n"
-            f"## 执行历史\n{history_str}\n\n"
-            "用户拒绝了上述命令的执行。请根据已有信息给出你能提供的最佳回答，"
-            "或者告知用户如果不执行该命令你无法完成任务的原因。"
-        )
-        messages: List[dict] = []
-        sp = self.llm.config.get("system_prompt")
-        if sp:
-            messages.append({"role": "system", "content": sp})
-        messages.append({"role": "user", "content": prompt})
+    def _finish_on_refused(self, messages: List[dict]) -> str:
+        """用户拒绝后，让 LLM 基于完整上下文给出最终回复。"""
+        messages.append({
+            "role": "user",
+            "content": "用户拒绝了上述工具的执行。请根据已有信息给出最佳回答，"
+                       "或说明为什么需要执行该操作。",
+        })
         return self.llm.invoke(messages)
-
-    def _parse_output(self, text: str) -> Tuple[Optional[str], Optional[str]]:
-        thought_m = re.search(r"Thought:\s*(.+?)(?=\n\s*Action:|\Z)", text, re.DOTALL | re.IGNORECASE)
-        action_m = re.search(r"Action:\s*(.+?)(?:\n\n|\nThought:|\Z)", text, re.DOTALL | re.IGNORECASE)
-        thought = thought_m.group(1).strip() if thought_m else None
-        action = action_m.group(1).strip() if action_m else None
-        if action:
-            action = " ".join(action.split())
-        return thought, action
-
-    def _parse_action(self, action_text: str) -> Tuple[Optional[str], Optional[str]]:
-        """解析 `toolname[args]`，支持 Finish[...]。"""
-        m = re.match(r"(\w+)\[(.*)\]\s*$", action_text.strip(), re.DOTALL)
-        if m:
-            return m.group(1), m.group(2)
-        return None, None
-
-    def _parse_action_input(self, action_text: str) -> str:
-        m = re.match(r"\w+\[(.*)\]\s*$", action_text.strip(), re.DOTALL)
-        return m.group(1).strip() if m else ""
 
 
 class ReActChatLLM:
     """
     将 ReActAgent 适配成 ChatApp 期望的 llm 接口：提供 invoke()/stream()。
-
-    - invoke(messages) -> str：返回最终答案文本
-    - stream(messages) -> Generator[str]：以单块形式流式返回最终答案
-
-    注意：这里不做多轮 agent 记忆；question 取 messages 的最后一条 user 内容。
     """
 
     def __init__(self, agent: ReActAgent) -> None:

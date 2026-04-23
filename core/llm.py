@@ -1,11 +1,28 @@
+import json
 import time
-from typing import Generator, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, Generator, List, Optional
+
+
+@dataclass
+class ToolCall:
+    """从 LLM 响应中解析出的单次工具调用。"""
+    id: str
+    name: str
+    arguments: Dict[str, Any]
+
+
+@dataclass
+class LLMResponse:
+    """LLM 响应的统一内部表示，隔离 SDK 细节。"""
+    content: Optional[str] = None
+    tool_calls: List[ToolCall] = field(default_factory=list)
+    finish_reason: Optional[str] = None
 
 
 class OpenAICompatLLM:
     """
     与 ChatApp 共享的 config 引用，统一封装「非流式 / 流式」调用。
-    ReAct 等 Agent 通过 invoke() 使用同一套端点与模型配置。
     内部复用同一个 OpenAI client 实例，配置变更时自动重建。
     """
 
@@ -40,6 +57,46 @@ class OpenAICompatLLM:
             return "（未安装 openai 库，无法调用 API）"
         except Exception as e:
             return f"❌ API 错误: {e}"
+
+    def invoke_with_tools(self, messages: List[dict], tools_schema: List[dict]) -> LLMResponse:
+        """带工具定义的调用，返回标准化的 LLMResponse（可能包含 tool_calls）。"""
+        try:
+            client = self._get_client()
+            kwargs: Dict[str, Any] = {
+                "model": self.config["model"],
+                "messages": messages,
+                "max_tokens": self.config["max_tokens"],
+                "temperature": self.config["temperature"],
+                "stream": False,
+            }
+            if tools_schema:
+                kwargs["tools"] = tools_schema
+            response = client.chat.completions.create(**kwargs)
+            choice = response.choices[0]
+            message = choice.message
+
+            parsed_calls: List[ToolCall] = []
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    parsed_calls.append(ToolCall(
+                        id=tc.id,
+                        name=tc.function.name,
+                        arguments=args,
+                    ))
+
+            return LLMResponse(
+                content=(message.content or "").strip() or None,
+                tool_calls=parsed_calls,
+                finish_reason=choice.finish_reason,
+            )
+        except ImportError:
+            return LLMResponse(content="（未安装 openai 库，无法调用 API）")
+        except Exception as e:
+            return LLMResponse(content=f"❌ API 错误: {e}")
 
     def stream(self, messages: List[dict]) -> Generator[str, None, None]:
         try:
