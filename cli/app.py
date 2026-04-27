@@ -77,6 +77,54 @@ class ChatApp:
                 print_system(f"模型已切换为: {args}")
             else:
                 print_system(f"当前模型: {self.config['model']}")
+        elif command == "/apikey":
+            if args:
+                self.config["api_key"] = args
+                save_config(self.config)
+                self.use_demo = False
+                print_system("API Key 已更新")
+            else:
+                key = self.config.get("api_key", "")
+                if key:
+                    masked = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
+                    print_system(f"当前 API Key: {masked}")
+                else:
+                    print_system("API Key 未设置。用法: /apikey <your-key>")
+        elif command == "/base_url":
+            if args:
+                self.config["base_url"] = args
+                save_config(self.config)
+                print_system(f"Base URL 已更新为: {args}")
+            else:
+                print_system(f"当前 Base URL: {self.config.get('base_url', '(未设置)')}")
+        elif command == "/temperature":
+            if args:
+                try:
+                    val = float(args)
+                    if not (0 <= val <= 2):
+                        print_error("temperature 应在 0 到 2 之间")
+                    else:
+                        self.config["temperature"] = val
+                        save_config(self.config)
+                        print_system(f"temperature 已设置为: {val}")
+                except ValueError:
+                    print_error("temperature 必须是数字，如 /temperature 0.8")
+            else:
+                print_system(f"当前 temperature: {self.config.get('temperature', 0.8)}")
+        elif command == "/max_tokens":
+            if args:
+                try:
+                    val = int(args)
+                    if val <= 0:
+                        print_error("max_tokens 必须为正整数")
+                    else:
+                        self.config["max_tokens"] = val
+                        save_config(self.config)
+                        print_system(f"max_tokens 已设置为: {val}")
+                except ValueError:
+                    print_error("max_tokens 必须是整数，如 /max_tokens 4096")
+            else:
+                print_system(f"当前 max_tokens: {self.config.get('max_tokens', 2048)}")
         elif command == "/system":
             if args:
                 self.config["system_prompt"] = args

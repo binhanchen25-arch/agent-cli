@@ -116,6 +116,69 @@ class ChatAppTests(unittest.TestCase):
     def test_exit_command_returns_false(self):
         self.assertFalse(self.app.handle_command("/exit"))
 
+    def test_apikey_command_sets_key_and_disables_demo(self):
+        self.app.use_demo = True
+        with patch("cli.app.save_config") as mock_save, patch("cli.app.print_system"):
+            self.app.handle_command("/apikey sk-new-test-key-12345")
+
+        self.assertEqual(self.app.config["api_key"], "sk-new-test-key-12345")
+        self.assertFalse(self.app.use_demo)
+        mock_save.assert_called_once_with(self.app.config)
+
+    def test_apikey_command_no_args_shows_masked_key(self):
+        self.app.config["api_key"] = "sk-abcdef1234567890"
+        with patch("cli.app.print_system") as mock_print:
+            self.app.handle_command("/apikey")
+        mock_print.assert_called_once()
+        msg = mock_print.call_args[0][0]
+        self.assertIn("sk-abcde", msg)
+        self.assertNotIn("1234567890", msg)
+
+    def test_base_url_command_updates_config(self):
+        with patch("cli.app.save_config") as mock_save, patch("cli.app.print_system"):
+            self.app.handle_command("/base_url https://my-proxy.com/v1")
+
+        self.assertEqual(self.app.config["base_url"], "https://my-proxy.com/v1")
+        mock_save.assert_called_once()
+
+    def test_temperature_command_valid_value(self):
+        with patch("cli.app.save_config") as mock_save, patch("cli.app.print_system"):
+            self.app.handle_command("/temperature 0.5")
+
+        self.assertEqual(self.app.config["temperature"], 0.5)
+        mock_save.assert_called_once()
+
+    def test_temperature_command_rejects_out_of_range(self):
+        original = self.app.config["temperature"]
+        with patch("cli.app.save_config") as mock_save, patch("cli.app.print_error"):
+            self.app.handle_command("/temperature 3.0")
+
+        self.assertEqual(self.app.config["temperature"], original)
+        mock_save.assert_not_called()
+
+    def test_temperature_command_rejects_non_number(self):
+        original = self.app.config["temperature"]
+        with patch("cli.app.save_config") as mock_save, patch("cli.app.print_error"):
+            self.app.handle_command("/temperature abc")
+
+        self.assertEqual(self.app.config["temperature"], original)
+        mock_save.assert_not_called()
+
+    def test_max_tokens_command_valid_value(self):
+        with patch("cli.app.save_config") as mock_save, patch("cli.app.print_system"):
+            self.app.handle_command("/max_tokens 4096")
+
+        self.assertEqual(self.app.config["max_tokens"], 4096)
+        mock_save.assert_called_once()
+
+    def test_max_tokens_command_rejects_non_positive(self):
+        original = self.app.config["max_tokens"]
+        with patch("cli.app.save_config") as mock_save, patch("cli.app.print_error"):
+            self.app.handle_command("/max_tokens -1")
+
+        self.assertEqual(self.app.config["max_tokens"], original)
+        mock_save.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
