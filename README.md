@@ -4,7 +4,7 @@
 
 ## ✨ 功能特性
 
-- 💬 **流式对话** — 实时 Markdown 渲染，支持 OpenAI 兼容 API
+- 💬 **流式对话** — 实时 Markdown 渲染以及支持 OpenAI 兼容 API
 - 🧠 **ReAct 智能体** — 多步推理 + 工具调用，自动拆解任务
 - 🔧 **可扩展工具** — 内置 echo、now、命令执行工具，支持自定义扩展
 - 🎨 **Rich 终端 UI** — Markdown 面板、配置表格、Spinner 动画
