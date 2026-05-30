@@ -30,6 +30,8 @@ class OpenAICompatLLM:
         self.config = config
         self._client: Optional[object] = None
         self._client_key: Optional[tuple] = None
+        self._default_retry_times = 3
+        self._default_retry_base_delay = 0.6
 
     def _get_client(self):
         """获取或创建 OpenAI client，仅在 api_key/base_url 变更时重建。"""
@@ -41,15 +43,86 @@ class OpenAICompatLLM:
             self._client_key = key
         return self._client
 
+    def _get_retry_times(self) -> int:
+        value = self.config.get("retry_times", self._default_retry_times)
+        try:
+            times = int(value)
+        except (TypeError, ValueError):
+            times = self._default_retry_times
+        return max(1, times)
+
+    def _get_retry_base_delay(self) -> float:
+        value = self.config.get("retry_base_delay", self._default_retry_base_delay)
+        try:
+            delay = float(value)
+        except (TypeError, ValueError):
+            delay = self._default_retry_base_delay
+        return max(0.1, delay)
+
+    def _should_retry_exception(self, exc: Exception) -> bool:
+        """仅对临时性错误重试：连接超时、限流、服务端 5xx。"""
+        name = exc.__class__.__name__
+        retryable_names = {
+            "APIConnectionError",
+            "APITimeoutError",
+            "RateLimitError",
+            "InternalServerError",
+        }
+        if name in retryable_names:
+            return True
+
+        status_code = getattr(exc, "status_code", None)
+        if isinstance(status_code, int) and (status_code == 429 or status_code >= 500):
+            return True
+
+        message = str(exc).lower()
+        retryable_keywords = (
+            "timeout",
+            "timed out",
+            "connection reset",
+            "temporarily unavailable",
+            "service unavailable",
+            "rate limit",
+            "too many requests",
+        )
+        if any(k in message for k in retryable_keywords):
+            return True
+
+        return False
+
+    def _call_with_retry(self, fn, action: str):
+        """统一重试入口：指数退避，仅重试可恢复错误。"""
+        max_attempts = self._get_retry_times()
+        base_delay = self._get_retry_base_delay()
+        last_exc: Optional[Exception] = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return fn()
+            except Exception as e:
+                last_exc = e
+                if attempt >= max_attempts or not self._should_retry_exception(e):
+                    raise
+                sleep_s = base_delay * (2 ** (attempt - 1))
+                # 控制上限，避免长时间阻塞
+                time.sleep(min(sleep_s, 4.0))
+
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError(f"{action} 未知错误")
+
     def invoke(self, messages: List[dict]) -> str:
         try:
             client = self._get_client()
-            response = client.chat.completions.create(
-                model=self.config["model"],
-                messages=messages,
-                max_tokens=self.config["max_tokens"],
-                temperature=self.config["temperature"],
-                stream=False,
+            response = self._call_with_retry(
+                lambda: client.chat.completions.create(
+                    model=self.config["model"],
+                    messages=messages,
+                    max_tokens=self.config["max_tokens"],
+                    temperature=self.config["temperature"],
+                    stream=False,
+                ),
+                "invoke",
             )
             choice = response.choices[0].message
             return (choice.content or "").strip()
@@ -71,7 +144,10 @@ class OpenAICompatLLM:
             }
             if tools_schema:
                 kwargs["tools"] = tools_schema
-            response = client.chat.completions.create(**kwargs)
+            response = self._call_with_retry(
+                lambda: client.chat.completions.create(**kwargs),
+                "invoke_with_tools",
+            )
             choice = response.choices[0]
             message = choice.message
 
@@ -119,7 +195,10 @@ class OpenAICompatLLM:
             }
             if tools_schema:
                 kwargs["tools"] = tools_schema
-            response = client.chat.completions.create(**kwargs)
+            response = self._call_with_retry(
+                lambda: client.chat.completions.create(**kwargs),
+                "stream_with_tools",
+            )
         except ImportError:
             yield ("content", "（未安装 openai 库，无法调用 API）")
             yield ("done", LLMResponse(content="（未安装 openai 库，无法调用 API）"))
@@ -196,12 +275,15 @@ class OpenAICompatLLM:
     def stream(self, messages: List[dict]) -> Generator[str, None, None]:
         try:
             client = self._get_client()
-            response = client.chat.completions.create(
-                model=self.config["model"],
-                messages=messages,
-                max_tokens=self.config["max_tokens"],
-                temperature=self.config["temperature"],
-                stream=True,
+            response = self._call_with_retry(
+                lambda: client.chat.completions.create(
+                    model=self.config["model"],
+                    messages=messages,
+                    max_tokens=self.config["max_tokens"],
+                    temperature=self.config["temperature"],
+                    stream=True,
+                ),
+                "stream",
             )
             for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content:
