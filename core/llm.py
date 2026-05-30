@@ -98,6 +98,101 @@ class OpenAICompatLLM:
         except Exception as e:
             return LLMResponse(content=f"❌ API 错误: {e}")
 
+    def stream_with_tools(
+        self, messages: List[dict], tools_schema: List[dict]
+    ) -> Generator[tuple, None, None]:
+        """
+        带工具定义的「真流式」调用。逐 chunk yield 事件：
+            ("content", str)         — LLM 输出的文本碎片
+            ("tool_calls", list)     — 整段流结束后累积出的工具调用（如果有）
+            ("done", LLMResponse)    — 整段流结束后的完整快照
+        消费方按需取 next；不取就阻塞在 yield，天然背压。
+        """
+        try:
+            client = self._get_client()
+            kwargs: Dict[str, Any] = {
+                "model": self.config["model"],
+                "messages": messages,
+                "max_tokens": self.config["max_tokens"],
+                "temperature": self.config["temperature"],
+                "stream": True,
+            }
+            if tools_schema:
+                kwargs["tools"] = tools_schema
+            response = client.chat.completions.create(**kwargs)
+        except ImportError:
+            yield ("content", "（未安装 openai 库，无法调用 API）")
+            yield ("done", LLMResponse(content="（未安装 openai 库，无法调用 API）"))
+            return
+        except Exception as e:
+            msg = f"❌ API 错误: {e}"
+            yield ("content", msg)
+            yield ("done", LLMResponse(content=msg))
+            return
+
+        # tool_calls 按 index 累积（OpenAI 流式协议）
+        # index -> {"id": str, "name": str, "arguments": str（拼接中）}
+        tc_buffer: Dict[int, Dict[str, str]] = {}
+        content_parts: List[str] = []
+        finish_reason: Optional[str] = None
+
+        try:
+            for chunk in response:
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                if delta and delta.content:
+                    content_parts.append(delta.content)
+                    yield ("content", delta.content)
+
+                if delta and delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        slot = tc_buffer.setdefault(
+                            idx, {"id": "", "name": "", "arguments": ""}
+                        )
+                        if tc_delta.id:
+                            slot["id"] = tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                slot["name"] = tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                slot["arguments"] += tc_delta.function.arguments
+
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+        finally:
+            # 消费方 GeneratorExit / 异常时也要清理底层 HTTP 连接
+            close = getattr(response, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+
+        # 流结束 → 把累积好的 tool_calls 整体吐出
+        parsed_calls: List[ToolCall] = []
+        for idx in sorted(tc_buffer.keys()):
+            slot = tc_buffer[idx]
+            try:
+                args = json.loads(slot["arguments"]) if slot["arguments"] else {}
+            except (json.JSONDecodeError, TypeError):
+                args = {}
+            parsed_calls.append(ToolCall(
+                id=slot["id"], name=slot["name"], arguments=args,
+            ))
+
+        if parsed_calls:
+            yield ("tool_calls", parsed_calls)
+
+        yield ("done", LLMResponse(
+            content="".join(content_parts).strip() or None,
+            tool_calls=parsed_calls,
+            finish_reason=finish_reason,
+        ))
+
     def stream(self, messages: List[dict]) -> Generator[str, None, None]:
         try:
             client = self._get_client()

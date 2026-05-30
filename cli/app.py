@@ -10,7 +10,7 @@ from cli.renderer import (
 )
 
 from core.config import load_config, save_config, ensure_dirs, HISTORY_FILE
-from core.llm import OpenAICompatLLM, demo_stream, stream_text
+from core.llm import OpenAICompatLLM, demo_stream
 from core.reagent import ReActAgent, ReActChatLLM
 from tools.builtin import set_allow_all_windows_cmd
 
@@ -154,10 +154,10 @@ class ChatApp:
         """ReAct 模式：多步推理 + 工具调用，结果以 Markdown 面板展示。"""
         print_user_message(f"/react {question}")
         agent = ReActAgent("MyCLI", self.base_llm)
-        answer = agent.run(question)
+        stream = agent.run_stream(question)
+        answer = render_stream(stream)
         self.messages.append({"role": "user", "content": f"[ReAct] {question}"})
         self.messages.append({"role": "assistant", "content": answer})
-        render_stream(stream_text(answer))
 
     def _show_history(self):
         if len(self.messages) <= 1:
@@ -210,8 +210,9 @@ class ChatApp:
                     self.chat(user_input)
 
             except KeyboardInterrupt:
-                print_system("再见！👋")
-                break
+                # 提示用 /exit 退出（流式中的 Ctrl+C 已由 render_stream 处理）
+                print_system("按 Ctrl+C 已取消；输入 /exit 退出。")
+                continue
             except EOFError:
                 break
         exit_fullscreen()

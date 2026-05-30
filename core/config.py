@@ -5,7 +5,7 @@ from typing import Callable, Dict, Tuple
 
 from dotenv import load_dotenv
 
-CONFIG_DIR = Path.home() / ".mycli"
+CONFIG_DIR = Path.cwd() / ".mycli"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 HISTORY_FILE = CONFIG_DIR / "history.txt"
 
@@ -19,14 +19,14 @@ DEFAULT_CONFIG: dict = {
     "system_prompt": "你是一个有用的终端助手，擅长回答编程和系统管理问题。请用简洁的方式回答。",
 }
 
-# .env 变量名 → (config key, 类型转换器)
-_ENV_MAPPING: Dict[str, Tuple[str, Callable[[str], object]]] = {
-    "OPENAI_API_KEY": ("api_key", str),
-    "OPENAI_BASE_URL": ("base_url", str),
-    "OPENAI_MODEL": ("model", str),
-    "OPENAI_MAX_TOKENS": ("max_tokens", int),
-    "OPENAI_TEMPERATURE": ("temperature", float),
-    "OPENAI_SYSTEM_PROMPT": ("system_prompt", str),
+# config key → (类型转换器, [可识别的环境变量名，从前往后第一个有值的生效])
+_ENV_MAPPING: Dict[str, Tuple[Callable[[str], object], Tuple[str, ...]]] = {
+    "api_key":       (str,   ("OPENAI_API_KEY", "API_KEY", "api_key")),
+    "base_url":      (str,   ("OPENAI_BASE_URL", "BASE_URL", "base_url")),
+    "model":         (str,   ("OPENAI_MODEL", "MODEL", "model")),
+    "max_tokens":    (int,   ("OPENAI_MAX_TOKENS", "MAX_TOKENS", "max_tokens")),
+    "temperature":   (float, ("OPENAI_TEMPERATURE", "TEMPERATURE", "temperature")),
+    "system_prompt": (str,   ("OPENAI_SYSTEM_PROMPT", "SYSTEM_PROMPT", "system_prompt")),
 }
 
 
@@ -34,9 +34,15 @@ def _load_env_layer() -> dict:
     """第 1 层（低优先级）：从 .env / 进程环境变量读取。"""
     load_dotenv()  # 把当前目录的 .env 注入 os.environ；已存在的环境变量不会被覆盖
     layer: dict = {}
-    for env_key, (config_key, cast) in _ENV_MAPPING.items():
-        value = os.getenv(env_key)
-        if value is None or value == "":
+    for config_key, (cast, env_names) in _ENV_MAPPING.items():
+        # 按列表顺序查找，第一个非空者生效（OPENAI_X > X > 小写 x）
+        value = None
+        for env_name in env_names:
+            v = os.getenv(env_name)
+            if v is not None and v != "":
+                value = v
+                break
+        if value is None:
             continue
         try:
             layer[config_key] = cast(value)
@@ -71,10 +77,21 @@ def load_config() -> dict:
 
 def save_config(config: dict):
     """持久化到第 2 层（<cwd>/.mycli/config.json）。"""
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise OSError(
+            f"无法创建配置目录 {CONFIG_DIR}：{e}。"
+            f"请切换到一个有写入权限的目录后再保存配置。"
+        ) from e
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
 
 def ensure_dirs():
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    """启动时调用：尝试创建 .mycli/ 目录；当前 cwd 不可写就静默跳过。
+    （配置仍能通过 .env 或环境变量提供，历史/持久化功能则会降级失效）"""
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass

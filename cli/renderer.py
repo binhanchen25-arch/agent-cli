@@ -68,22 +68,51 @@ def print_user_message(text: str):
 
 
 def render_stream(stream: Generator[str, None, None]) -> str:
-    """流式渲染 Markdown，返回完整文本"""
+    """
+    流式渲染 Markdown，返回完整文本。
+    Ctrl+C 时：关闭底层生成器（触发其 finally 清理）、定格已显示内容、
+    在末尾追加「[已取消]」提示，并把累积的 partial 文本返回给调用方。
+    """
     full_text = ""
     console.print()
-    with Live(console=console, refresh_per_second=12, vertical_overflow="visible") as live:
-        for chunk in stream:
-            full_text += chunk
-            live.update(
-                Panel(
-                    Markdown(full_text),
-                    border_style="green",
-                    title="🤖 助手",
-                    title_align="left",
-                    padding=(0, 1),
+    cancelled = False
+    try:
+        with Live(console=console, refresh_per_second=12, vertical_overflow="visible") as live:
+            try:
+                for chunk in stream:
+                    full_text += chunk
+                    live.update(
+                        Panel(
+                            Markdown(full_text),
+                            border_style="green",
+                            title="🤖 助手",
+                            title_align="left",
+                            padding=(0, 1),
+                        )
+                    )
+            except KeyboardInterrupt:
+                cancelled = True
+                # 关闭生成器 → 触发 stream 内 try/finally 清理 HTTP 连接、status spinner 等
+                close = getattr(stream, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:
+                        pass
+                # 在已显示内容末尾追加取消标记并定格
+                full_text_with_mark = full_text + "\n\n> ⛔ **[已取消]**"
+                live.update(
+                    Panel(
+                        Markdown(full_text_with_mark),
+                        border_style="yellow",
+                        title="🤖 助手",
+                        title_align="left",
+                        padding=(0, 1),
+                    )
                 )
-            )
-    return full_text
+    finally:
+        pass
+    return full_text + ("\n\n[已取消]" if cancelled else "")
 
 
 def print_system(text: str):

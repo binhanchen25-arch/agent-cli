@@ -47,11 +47,22 @@ class ReActAgent:
         self.before_step: Optional[BeforeStepHook] = before_step or get_hook("before_step")
 
     def run(self, question: str) -> str:
-        """执行 Function Calling 循环，返回最终文本回复。"""
+        """执行 Function Calling 循环，返回最终文本回复（非流式，保留以兼容旧调用）。"""
+        # 复用 run_stream，把流式 token 拼起来作为最终结果
+        return "".join(self.run_stream(question))
+
+    def run_stream(self, question: str) -> Generator[str, None, None]:
+        """
+        流式执行 Function Calling 循环：
+            - LLM 输出的 token 实时 yield
+            - 工具调用 / 状态提示以 Markdown 片段形式 yield 到同一对话面板
+            - 消费方按 Ctrl+C 触发 GeneratorExit 时，会清理 status / HTTP 连接
+        """
         from cli.renderer import console
 
         if not self.llm.config.get("api_key"):
-            return "Agent 模式需要配置 API Key（环境变量 OPENAI_API_KEY 或配置文件中的 api_key）。"
+            yield "Agent 模式需要配置 API Key（环境变量 OPENAI_API_KEY 或配置文件中的 api_key）。"
+            return
 
         messages: List[dict] = [
             {"role": "system", "content": self.system_prompt},
@@ -60,29 +71,54 @@ class ReActAgent:
         tools_schema = self.tool_registry.get_openai_tools_schema()
         total_calls = 0
 
-        with console.status("🤔 Thinking…", spinner="dots") as status:
+        status_cm = console.status("🤔 Thinking…", spinner="dots")
+        status = status_cm.__enter__()
+        try:
             for step in range(1, self.max_steps + 1):
                 status.update(f"🤔 Thinking… (step {step}/{self.max_steps})")
 
-                # 每次 LLM 调用前触发用户钩子；hook 可观察或替换 messages
+                # 用户钩子
                 if self.before_step is not None:
                     try:
                         new_messages = self.before_step(step, messages)
                         if isinstance(new_messages, list):
                             messages = new_messages
                     except Exception as e:
-                        console.print(f"[yellow]before_step hook 异常已忽略: {e}[/yellow]")
+                        yield f"\n\n> ⚠️ before_step hook 异常已忽略: `{e}`\n\n"
 
-                resp = self.llm.invoke_with_tools(messages, tools_schema)
+                # 真流式调用 LLM
+                final_resp = None
+                tool_calls: List = []
+                inner_stream = self.llm.stream_with_tools(messages, tools_schema)
+                try:
+                    for event_type, payload in inner_stream:
+                        if event_type == "content":
+                            yield payload  # ← 实时透传 token
+                        elif event_type == "tool_calls":
+                            tool_calls = payload
+                        elif event_type == "done":
+                            final_resp = payload
+                finally:
+                    # 我们被 close() 时，确保底层 LLM 流也关闭（释放 HTTP 连接）
+                    close = getattr(inner_stream, "close", None)
+                    if callable(close):
+                        try:
+                            close()
+                        except Exception:
+                            pass
 
-                # 没有工具调用 → LLM 直接给出最终回答
-                if not resp.tool_calls:
-                    return resp.content or "（无回复）"
+                # 没有工具调用 → LLM 已直接给出最终回答（token 已 yield 完）
+                if not tool_calls:
+                    return
 
-                # 将带 tool_calls 的 assistant 消息追加到历史
-                assistant_msg: dict = {
+                # 提示用户：模型决定调用工具
+                names = ", ".join(f"`{tc.name}`" for tc in tool_calls)
+                # yield f"\n\n> 🔧 调用工具：{names}\n\n"
+
+                # 把带 tool_calls 的 assistant 消息追加到历史
+                messages.append({
                     "role": "assistant",
-                    "content": resp.content or "",
+                    "content": (final_resp.content if final_resp else "") or "",
                     "tool_calls": [
                         {
                             "id": tc.id,
@@ -92,13 +128,12 @@ class ReActAgent:
                                 "arguments": json.dumps(tc.arguments, ensure_ascii=False),
                             },
                         }
-                        for tc in resp.tool_calls
+                        for tc in tool_calls
                     ],
-                }
-                messages.append(assistant_msg)
+                })
 
-                # 按序执行每个 tool call，结果作为 tool 消息追加
-                for tc in resp.tool_calls:
+                # 按序执行每个 tool call
+                for tc in tool_calls:
                     total_calls += 1
                     status.update(f"🔧 Running: {tc.name} ({total_calls} calls)")
 
@@ -107,13 +142,15 @@ class ReActAgent:
                             tc.name, tc.arguments
                         )
                     except UserRefusedError as e:
-                        # 用户拒绝 → 记录拒绝结果并让 LLM 基于已有信息回复
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
                             "content": f"用户拒绝: {e.detail}",
                         })
-                        return self._finish_on_refused(messages)
+                        yield f"\n> ❌ 用户拒绝执行 `{tc.name}`\n\n"
+                        # 用户拒绝后让 LLM 基于已有上下文做收尾（这一步非流式以简化处理）
+                        yield self._finish_on_refused(messages)
+                        return
 
                     messages.append({
                         "role": "tool",
@@ -121,7 +158,9 @@ class ReActAgent:
                         "content": result,
                     })
 
-        return "抱歉，在限定步数内未能完成任务。"
+            yield "\n\n抱歉，在限定步数内未能完成任务。"
+        finally:
+            status_cm.__exit__(None, None, None)
 
     def _finish_on_refused(self, messages: List[dict]) -> str:
         """用户拒绝后，让 LLM 基于完整上下文给出最终回复。"""
@@ -148,6 +187,8 @@ class ReActChatLLM:
         return self.agent.run(question)
 
     def stream(self, messages: List[dict]) -> Generator[str, None, None]:
-        from core.llm import stream_text
-
-        yield from stream_text(self.invoke(messages))
+        """真流式：直接转发 agent.run_stream 的 token / 状态片段。"""
+        question = ""
+        if messages:
+            question = str(messages[-1].get("content", ""))
+        yield from self.agent.run_stream(question)
