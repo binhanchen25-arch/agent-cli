@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mycli-agent"
+version = "0.1.0"
+description = "Copilot 风格的终端 AI 助手，支持流式聊天、ReAct 智能体与工具调用"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "MyCLI Authors" },
+]
+keywords = ["cli", "ai", "agent", "react", "openai", "copilot", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+    "Topic :: Terminals",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "rich>=13.0.0",
+    "prompt_toolkit>=3.0.0",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.0.0",
+    "twine>=4.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-username/mycli"
+Repository = "https://github.com/your-username/mycli"
+Issues = "https://github.com/your-username/mycli/issues"
+
+# 安装后终端可直接 `mycli` / `mycli --version` / `mycli sdk-schema`
+[project.scripts]
+mycli = "entrypoints.cli:main"
+
+# ============================================================
+# Hatchling 打包配置
+# ============================================================
+# 当前仓库使用「多顶层包」布局（cli/ core/ tools/ entrypoints/），
+# 这里显式列出要打入 wheel 的包目录，避免 hatchling 自动猜测。
+#
+# ⚠️ 注意：cli / core / tools 这类通用名称在 PyPI 上极易与其他包冲突。
+#    若计划正式发布到 PyPI，强烈建议先把 4 个目录搬到统一的命名空间下
+#    （例如 src/mycli_agent/{cli,core,tools,entrypoints}/），再把
+#    [project.scripts] 入口改为 `mycli_agent.entrypoints.cli:main`。
+# ============================================================
+[tool.hatch.build.targets.wheel]
+packages = ["cli", "core", "tools", "entrypoints"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/cli",
+    "/core",
+    "/tools",
+    "/entrypoints",
+    "/main.py",
+    "/README.md",
+    "/requirements.txt",
+]
+exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "/test",
+    "/.venv",
+    "/.idea",
+    "/.pytest_cache",
+    "/.github",
+]
