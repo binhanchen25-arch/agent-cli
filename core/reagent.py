@@ -2,14 +2,20 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Generator, List, Optional
+from typing import TYPE_CHECKING, Callable, Generator, List, Optional
 
 if TYPE_CHECKING:
     from core.llm import OpenAICompatLLM
 
+from core.hooks import get_hook
 from tools.base import UserRefusedError
 from tools.builtin import default_tool_registry
 from tools.registry import ToolRegistry
+
+# before_step hook 的签名：
+#   (step: int, messages: list[dict]) -> list[dict] | None
+# 返回 None → 不变；返回 list → 替换 messages。
+BeforeStepHook = Callable[[int, List[dict]], Optional[List[dict]]]
 
 AGENT_SYSTEM_PROMPT = """你是一个强大的 AI 助手，可以调用工具来完成任务。
 当你需要获取信息时，请使用可用的工具。你可以在一次回复中调用多个工具来并行获取信息。
@@ -30,12 +36,15 @@ class ReActAgent:
         tool_registry: Optional[ToolRegistry] = None,
         max_steps: int = 20,
         custom_prompt: Optional[str] = None,
+        before_step: Optional[BeforeStepHook] = None,
     ) -> None:
         self.name = name
         self.llm = llm
         self.tool_registry = tool_registry or default_tool_registry()
         self.max_steps = max_steps
         self.system_prompt = custom_prompt or AGENT_SYSTEM_PROMPT
+        # 显式传入优先；否则尝试从 ~/.mycli/hooks.py 加载
+        self.before_step: Optional[BeforeStepHook] = before_step or get_hook("before_step")
 
     def run(self, question: str) -> str:
         """执行 Function Calling 循环，返回最终文本回复。"""
@@ -54,6 +63,15 @@ class ReActAgent:
         with console.status("🤔 Thinking…", spinner="dots") as status:
             for step in range(1, self.max_steps + 1):
                 status.update(f"🤔 Thinking… (step {step}/{self.max_steps})")
+
+                # 每次 LLM 调用前触发用户钩子；hook 可观察或替换 messages
+                if self.before_step is not None:
+                    try:
+                        new_messages = self.before_step(step, messages)
+                        if isinstance(new_messages, list):
+                            messages = new_messages
+                    except Exception as e:
+                        console.print(f"[yellow]before_step hook 异常已忽略: {e}[/yellow]")
 
                 resp = self.llm.invoke_with_tools(messages, tools_schema)
 
