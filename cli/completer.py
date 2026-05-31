@@ -15,6 +15,7 @@ COMMANDS = {
     "/max_tokens": "设置最大 token 数（如 /max_tokens 4096）",
     "/system": "设置系统提示词",
     "/history": "查看对话历史",
+    "/context": "查看当前消息 token 与上下文占用",
     "/react": "切换到 ReAct 模式（/react 或 /react <问题>）",
     "/exit": "退出程序",
 }

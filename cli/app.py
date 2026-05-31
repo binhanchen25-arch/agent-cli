@@ -3,6 +3,7 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 
 from cli.completer import CliCompleter
+from cli.context_usage import calculate_context_usage
 from cli.renderer import (
     print_welcome, print_user_message, render_stream,
     print_system, print_error, print_config, clear_screen, console,
@@ -135,6 +136,8 @@ class ChatApp:
                 print_system(f"当前系统提示词: {self.config.get('system_prompt', '(无)')}")
         elif command == "/history":
             self._show_history()
+        elif command == "/context":
+            self._render_context_usage()
         elif command == "/react":
             # /react：把当前 llm 切换成 ReAct agent（包装成与 ChatApp 兼容的 stream/invoke 接口）
             self.llm = ReActChatLLM(ReActAgent("MyCLI", self.base_llm))
@@ -150,6 +153,19 @@ class ChatApp:
     def _show_help(self):
         render_stream(demo_stream("帮助"))
 
+    def _render_context_usage(self):
+        """在 CLI 中渲染当前消息 token 与上下文占用。"""
+        stats = calculate_context_usage(
+            messages=self.messages,
+            model=self.config.get("model", "gpt-4o-mini"),
+        )
+        print_system(
+            "当前内容 token 占用: "
+            f"{int(stats['token_count'])}/{int(stats['context_window'])} tokens "
+            f"({stats['context_percent']}%), "
+            f"剩余 {int(stats['remaining_tokens'])} tokens"
+        )
+
     def _run_react(self, question: str):
         """ReAct 模式：多步推理 + 工具调用，结果以 Markdown 面板展示。"""
         print_user_message(f"/react {question}")
@@ -158,6 +174,7 @@ class ChatApp:
         answer = render_stream(stream)
         self.messages.append({"role": "user", "content": f"[ReAct] {question}"})
         self.messages.append({"role": "assistant", "content": answer})
+        self._render_context_usage()
 
     def _show_history(self):
         if len(self.messages) <= 1:
@@ -182,6 +199,7 @@ class ChatApp:
 
         reply = render_stream(stream)
         self.messages.append({"role": "assistant", "content": reply})
+        self._render_context_usage()
 
     def run(self):
         print_welcome()
