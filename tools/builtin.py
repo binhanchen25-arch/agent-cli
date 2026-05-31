@@ -23,32 +23,20 @@ from tools.fetch_url import FetchUrlTool
 from tools.python_repl import PythonReplTool
 from tools.file_ops import FileOpsTool
 from tools.create_docx import CreateDocxTool
-
-_ALLOW_ALL_WINDOWS_CMD = False
-
+from tools.confirm import (
+    confirm_in_cli,
+    get_allow_all_windows_cmd as _get_allow_all_windows_cmd,
+    set_allow_all_windows_cmd as _set_allow_all_windows_cmd,
+)
 
 def set_allow_all_windows_cmd(enabled: bool) -> None:
-    """设置是否跳过 windows_cmd 的人工确认。"""
-    global _ALLOW_ALL_WINDOWS_CMD
-    _ALLOW_ALL_WINDOWS_CMD = enabled
+    """设置是否跳过危险工具（含 windows_cmd）的人工确认。"""
+    _set_allow_all_windows_cmd(enabled)
 
 
 def get_allow_all_windows_cmd() -> bool:
-    """读取是否跳过 windows_cmd 的人工确认。"""
-    return _ALLOW_ALL_WINDOWS_CMD
-
-
-def _confirm_in_cli(command: str) -> bool:
-    """纯命令行确认：输入 yes/y 执行，no/n 取消。"""
-    while True:
-        answer = console.input(
-            f"[bold yellow]确认执行该命令？[/bold yellow] 输入 [green]yes/y[/green] 或 [red]no/n[/red]\n> "
-        ).strip().lower()
-        if answer in ("yes", "y"):
-            return True
-        if answer in ("no", "n"):
-            return False
-        console.print("请输入 yes/y 或 no/n。", style="error")
+    """读取是否跳过危险工具（含 windows_cmd）的人工确认。"""
+    return _get_allow_all_windows_cmd()
 
 
 class EchoTool(Tool):
@@ -141,7 +129,7 @@ class WindowsCmdTool(Tool):
         )
 
         if not get_allow_all_windows_cmd():
-            approved = _confirm_in_cli(command)
+            approved = confirm_in_cli(f"工具: windows_cmd\\n命令: {command}")
             if not approved:
                 raise UserRefusedError("windows_cmd", f"用户拒绝执行命令: {command}")
 
