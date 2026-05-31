@@ -16,6 +16,12 @@ from rich.panel import Panel
 from cli.renderer import console
 from tools.base import Tool, ToolParameter, UserRefusedError
 from tools.registry import ToolRegistry
+from tools.web_search import WebSearchTool
+from tools.write_file import WriteFileTool
+from tools.edit_file import EditFileTool
+from tools.fetch_url import FetchUrlTool
+from tools.python_repl import PythonReplTool
+from tools.file_ops import FileOpsTool
 
 _ALLOW_ALL_WINDOWS_CMD = False
 
@@ -398,5 +404,9 @@ def default_tool_registry() -> ToolRegistry:
     reg.register_many([
         EchoTool(), NowTool(), WindowsCmdTool(),
         TreeTool(), GlobTool(), GrepTool(), ViewTool(),
+        WebSearchTool(),
+        WriteFileTool(), EditFileTool(), FileOpsTool(),
+        FetchUrlTool(),
+        PythonReplTool(),
     ])
     return reg
