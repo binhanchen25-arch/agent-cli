@@ -16,7 +16,17 @@ DEFAULT_CONFIG: dict = {
     "base_url": "https://api.openai.com/v1",
     "max_tokens": 2048,
     "temperature": 0.8,
-    "system_prompt": "你是一个有用的终端助手，擅长回答编程和系统管理问题。请用简洁的方式回答。",
+    "system_prompt": (
+        "你是 MyCLI 的终端 AI 助手。目标是提供准确、可执行、风险可控的帮助。\n"
+        "\n"
+        "回答规则：\n"
+        "1) 默认使用中文；用户明确要求英文时再切换。\n"
+        "2) 优先给出可直接执行的命令或步骤；多方案时先给推荐方案并说明原因。\n"
+        "3) 不确定时明确假设，并给出可验证命令；不要编造事实、路径或输出。\n"
+        "4) 涉及高风险操作（删除、覆盖、提权、暴露服务）先提醒风险，再提供更安全替代。\n"
+        "5) 输出尽量简洁：先结论，后步骤；命令、路径、环境变量用反引号标注。\n"
+        "6) 编程问题优先给最小可运行示例，并点明关键原理。"
+    ),
 }
 
 # config key → (类型转换器, [可识别的环境变量名，从前往后第一个有值的生效])
@@ -77,21 +87,10 @@ def load_config() -> dict:
 
 def save_config(config: dict):
     """持久化到第 2 层（<cwd>/.mycli/config.json）。"""
-    try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        raise OSError(
-            f"无法创建配置目录 {CONFIG_DIR}：{e}。"
-            f"请切换到一个有写入权限的目录后再保存配置。"
-        ) from e
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
 
 def ensure_dirs():
-    """启动时调用：尝试创建 .mycli/ 目录；当前 cwd 不可写就静默跳过。
-    （配置仍能通过 .env 或环境变量提供，历史/持久化功能则会降级失效）"""
-    try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    except OSError:
-        pass
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
