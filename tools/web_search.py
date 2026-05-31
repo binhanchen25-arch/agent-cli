@@ -39,11 +39,11 @@ class WebSearchTool(Tool):
 
     def run(self, parameters: Dict[str, Any]) -> str:
         try:
-            from duckduckgo_search import DDGS  # type: ignore
+            from ddgs import DDGS  # type: ignore
         except ImportError:
             return (
-                "缺少依赖 `duckduckgo-search`，请先执行：\n"
-                "  pip install duckduckgo-search"
+                "缺少依赖 `ddgs`，请先执行：\n"
+                "  pip install ddgs"
             )
 
         query = str(parameters.get("query", "")).strip()
