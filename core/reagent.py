@@ -65,12 +65,32 @@ class ReActAgent:
         # 显式传入优先；否则尝试从 ~/.mycli/hooks.py 加载
         self.before_step: Optional[BeforeStepHook] = before_step or get_hook("before_step")
 
-    def run(self, question: str) -> str:
+    def _build_initial_messages(self, question: str, history: Optional[List[dict]] = None) -> List[dict]:
+        """构造 ReAct 初始消息：system + 历史 + 当前问题。"""
+        messages: List[dict] = [{"role": "system", "content": self.system_prompt}]
+
+        if history:
+            for msg in history:
+                if not isinstance(msg, dict):
+                    continue
+                role = msg.get("role")
+                if role not in ("user", "assistant"):
+                    # CLI 历史里主要是 user/assistant；其他角色先忽略，避免污染输入。
+                    continue
+                content = str(msg.get("content", ""))
+                if not content:
+                    continue
+                messages.append({"role": role, "content": content})
+
+        messages.append({"role": "user", "content": question})
+        return messages
+
+    def run(self, question: str, history: Optional[List[dict]] = None) -> str:
         """执行 Function Calling 循环，返回最终文本回复（非流式，保留以兼容旧调用）。"""
         # 复用 run_stream，把流式 token 拼起来作为最终结果
-        return "".join(self.run_stream(question))
+        return "".join(self.run_stream(question, history=history))
 
-    def run_stream(self, question: str) -> Generator[str, None, None]:
+    def run_stream(self, question: str, history: Optional[List[dict]] = None) -> Generator[str, None, None]:
         """
         流式执行 Function Calling 循环：
             - LLM 输出的 token 实时 yield
@@ -83,10 +103,7 @@ class ReActAgent:
             yield "Agent 模式需要配置 API Key（环境变量 OPENAI_API_KEY 或配置文件中的 api_key）。"
             return
 
-        messages: List[dict] = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": question},
-        ]
+        messages = self._build_initial_messages(question, history=history)
         tools_schema = self.tool_registry.get_openai_tools_schema()
         total_calls = 0
 
@@ -203,11 +220,13 @@ class ReActChatLLM:
         question = ""
         if messages:
             question = str(messages[-1].get("content", ""))
-        return self.agent.run(question)
+        history = messages[:-1] if len(messages) > 1 else []
+        return self.agent.run(question, history=history)
 
     def stream(self, messages: List[dict]) -> Generator[str, None, None]:
         """真流式：直接转发 agent.run_stream 的 token / 状态片段。"""
         question = ""
         if messages:
             question = str(messages[-1].get("content", ""))
-        yield from self.agent.run_stream(question)
+        history = messages[:-1] if len(messages) > 1 else []
+        yield from self.agent.run_stream(question, history=history)

@@ -170,7 +170,7 @@ class ChatApp:
         """ReAct 模式：多步推理 + 工具调用，结果以 Markdown 面板展示。"""
         print_user_message(f"/react {question}")
         agent = ReActAgent("MyCLI", self.base_llm)
-        stream = agent.run_stream(question)
+        stream = agent.run_stream(question, history=self.messages)
         answer = render_stream(stream)
         self.messages.append({"role": "user", "content": f"[ReAct] {question}"})
         self.messages.append({"role": "assistant", "content": answer})
