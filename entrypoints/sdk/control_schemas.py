@@ -20,7 +20,7 @@ class QueryOptions(BaseModel):
     system_prompt: Optional[str] = Field(default=None, description="覆盖默认的 agent 系统提示词")
     allow_all_commands: bool = Field(
         default=False,
-        description="若为 True，则 windows_cmd 工具跳过人工确认。等价于 REPL 中的 /allow",
+        description="若为 True，则 windows_cmd 工具跳过人工确认。等价于 REPL 中的 \\allow",
     )
 
 

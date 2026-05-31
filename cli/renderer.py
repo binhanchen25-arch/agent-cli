@@ -54,8 +54,8 @@ def print_welcome():
 ╔══════════════════════════════════════════╗
 ║        🤖  MyCLI - 终端 AI 助手         ║
 ║                                          ║
-║  输入问题开始对话，输入 /help 查看帮助   ║
-║  按 Ctrl+C 或输入 /exit 退出            ║
+║  输入问题开始对话，输入 \help 查看帮助   ║
+║  按 Ctrl+C 或输入 \exit 退出            ║
 ╚══════════════════════════════════════════╝"""
     console.print(welcome, style="bold blue")
     console.print()
@@ -150,8 +150,8 @@ def clear_screen():
 ╔══════════════════════════════════════════╗
 ║        🤖  MyCLI - 终端 AI 助手         ║
 ║                                          ║
-║  输入问题开始对话，输入 /help 查看帮助   ║
-║  按 Ctrl+C 或输入 /exit 退出            ║
+║  输入问题开始对话，输入 \help 查看帮助   ║
+║  按 Ctrl+C 或输入 \exit 退出            ║
 ╚══════════════════════════════════════════╝"""
     console.print(welcome, style="bold blue")
     console.print()

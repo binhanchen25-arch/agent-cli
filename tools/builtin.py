@@ -22,6 +22,7 @@ from tools.edit_file import EditFileTool
 from tools.fetch_url import FetchUrlTool
 from tools.python_repl import PythonReplTool
 from tools.file_ops import FileOpsTool
+from tools.create_docx import CreateDocxTool
 
 _ALLOW_ALL_WINDOWS_CMD = False
 
@@ -100,7 +101,7 @@ class WindowsCmdTool(Tool):
             description=(
                 "在本机终端执行命令：Windows 使用 cmd.exe，macOS/Linux 使用 bash。"
                 "每次执行前会在 CLI 显示确认提示并要求输入 yes/no；"
-                "若用户执行 `/allow all`，则跳过确认直接执行。"
+                "若用户执行 `\\allow all`，则跳过确认直接执行。"
             ),
             expandable=False,
         )
@@ -408,5 +409,6 @@ def default_tool_registry() -> ToolRegistry:
         WriteFileTool(), EditFileTool(), FileOpsTool(),
         FetchUrlTool(),
         PythonReplTool(),
+        CreateDocxTool(),
     ])
     return reg
