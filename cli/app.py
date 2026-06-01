@@ -62,10 +62,10 @@ class ChatApp:
             allow_arg = args.strip().lower()
             if not allow_arg or allow_arg == "all":
                 set_allow_all_windows_cmd(True)
-                print_system("已开启 allow：命令执行将跳过 Yes/No 确认。")
+                print_system("已开启 allow：所有工具默认直接执行（不再弹出 Yes/No 确认）。")
             elif allow_arg in ("off", "none", "reset"):
                 set_allow_all_windows_cmd(False)
-                print_system("已关闭 allow：命令执行前会再次弹出 Yes/No 确认。")
+                print_system("已关闭 allow：所有工具默认执行前会弹出 Yes/No 确认。")
             else:
                 print_system("用法: \\allow  （可选: \\allow all, \\allow off）")
         elif command in ("\\chat", "\\normal"):

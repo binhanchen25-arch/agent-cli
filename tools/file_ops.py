@@ -6,8 +6,7 @@ import os
 import shutil
 from typing import Any, Dict, List
 
-from tools.base import Tool, ToolParameter, UserRefusedError
-from tools.confirm import confirm_in_cli, get_allow_all_windows_cmd
+from tools.base import Tool, ToolParameter
 
 
 class FileOpsTool(Tool):
@@ -59,16 +58,6 @@ class FileOpsTool(Tool):
             return "src 不能为空。"
 
         abs_src = os.path.abspath(src)
-
-        if not get_allow_all_windows_cmd():
-            approved = confirm_in_cli(
-                "工具: file_ops\n"
-                f"操作: {action}\n"
-                f"源路径: {abs_src}\n"
-                f"目标路径: {os.path.abspath(dst) if dst else '(无)'}"
-            )
-            if not approved:
-                raise UserRefusedError("file_ops", f"用户拒绝执行 {action}: {abs_src}")
 
         if action == "delete":
             if not os.path.exists(abs_src):

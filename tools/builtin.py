@@ -14,7 +14,7 @@ from typing import Any, Dict, List
 from rich.panel import Panel
 
 from cli.renderer import console
-from tools.base import Tool, ToolParameter, UserRefusedError
+from tools.base import Tool, ToolParameter
 from tools.registry import ToolRegistry
 from tools.web_search import WebSearchTool
 from tools.write_file import WriteFileTool
@@ -24,18 +24,17 @@ from tools.python_repl import PythonReplTool
 from tools.file_ops import FileOpsTool
 from tools.create_docx import CreateDocxTool
 from tools.confirm import (
-    confirm_in_cli,
     get_allow_all_windows_cmd as _get_allow_all_windows_cmd,
     set_allow_all_windows_cmd as _set_allow_all_windows_cmd,
 )
 
 def set_allow_all_windows_cmd(enabled: bool) -> None:
-    """设置是否跳过危险工具（含 windows_cmd）的人工确认。"""
+    """设置是否全局放行所有工具（兼容旧函数名）。"""
     _set_allow_all_windows_cmd(enabled)
 
 
 def get_allow_all_windows_cmd() -> bool:
-    """读取是否跳过危险工具（含 windows_cmd）的人工确认。"""
+    """读取是否全局放行所有工具（兼容旧函数名）。"""
     return _get_allow_all_windows_cmd()
 
 
@@ -81,15 +80,14 @@ class NowTool(Tool):
 
 
 class WindowsCmdTool(Tool):
-    """跨平台执行命令（执行前要求用户确认）。"""
+    """跨平台执行命令（确认逻辑由 ToolRegistry 统一处理）。"""
 
     def __init__(self) -> None:
         super().__init__(
             name="windows_cmd",
             description=(
                 "在本机终端执行命令：Windows 使用 cmd.exe，macOS/Linux 使用 bash。"
-                "每次执行前会在 CLI 显示确认提示并要求输入 yes/no；"
-                "若用户执行 `\\allow all`，则跳过确认直接执行。"
+                "是否弹出确认由工具参数 confirm 与全局 `\\allow` 设置共同决定。"
             ),
             expandable=False,
         )
@@ -127,11 +125,6 @@ class WindowsCmdTool(Tool):
                 padding=(1, 2),
             )
         )
-
-        if not get_allow_all_windows_cmd():
-            approved = confirm_in_cli(f"工具: windows_cmd\\n命令: {command}")
-            if not approved:
-                raise UserRefusedError("windows_cmd", f"用户拒绝执行命令: {command}")
 
         try:
             completed = subprocess.run(

@@ -5,8 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List
 
-from tools.base import Tool, ToolParameter, UserRefusedError
-from tools.confirm import confirm_in_cli, get_allow_all_windows_cmd
+from tools.base import Tool, ToolParameter
 
 
 class WriteFileTool(Tool):
@@ -48,15 +47,6 @@ class WriteFileTool(Tool):
 
         abs_path = os.path.abspath(path)
         parent = os.path.dirname(abs_path)
-
-        if not get_allow_all_windows_cmd():
-            approved = confirm_in_cli(
-                "工具: write_file\n"
-                f"目标文件: {abs_path}\n"
-                f"写入字节数: {len(content.encode('utf-8'))}"
-            )
-            if not approved:
-                raise UserRefusedError("write_file", f"用户拒绝写入文件: {abs_path}")
 
         try:
             os.makedirs(parent, exist_ok=True)

@@ -84,10 +84,19 @@ class Tool(ABC):
         return all(k in parameters for k in required)
 
     def to_dict(self) -> Dict[str, Any]:
+        params = [p.model_dump() for p in self.get_parameters()]
+        params.append(
+            ToolParameter(
+                name="confirm",
+                type="boolean",
+                description="是否在执行前询问用户确认。true=确认，false=直接执行；不传时使用全局默认。",
+                required=False,
+            ).model_dump()
+        )
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": [p.model_dump() for p in self.get_parameters()],
+            "parameters": params,
         }
 
     def to_openai_schema(self) -> Dict[str, Any]:
@@ -108,6 +117,12 @@ class Tool(ABC):
             properties[param.name] = prop
             if param.required:
                 required.append(param.name)
+
+        # 框架级参数：所有工具统一支持每次调用是否确认。
+        properties["confirm"] = {
+            "type": "boolean",
+            "description": "是否在执行前询问用户确认。true=确认，false=直接执行；不传时使用全局默认。",
+        }
 
         return {
             "type": "function",

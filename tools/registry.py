@@ -6,6 +6,11 @@ import json
 from typing import Any, Dict, List, Optional
 
 from tools.base import Tool, UserRefusedError
+from tools.confirm import (
+    confirm_in_cli,
+    should_confirm_tool_call,
+    strip_confirm_parameter,
+)
 
 
 class ToolRegistry:
@@ -87,14 +92,25 @@ class ToolRegistry:
 
     def _run_with_validation(self, tool: Tool, parameters: Dict[str, Any]) -> str:
         """统一的参数验证 + 执行路径。"""
-        if not tool.validate_parameters(parameters):
+        cleaned_parameters = strip_confirm_parameter(parameters)
+
+        if should_confirm_tool_call(parameters):
+            detail = (
+                f"工具: {tool.name}\n"
+                f"参数: {json.dumps(cleaned_parameters, ensure_ascii=False, indent=2)}"
+            )
+            approved = confirm_in_cli(detail)
+            if not approved:
+                raise UserRefusedError(tool.name, "用户在确认弹窗中拒绝执行")
+
+        if not tool.validate_parameters(cleaned_parameters):
             needed = [p.name for p in tool.get_parameters() if p.required]
             return (
                 f"参数不完整。工具 `{tool.name}` 需要字段: {needed}。"
-                f"收到: {list(parameters.keys())}"
+                f"收到: {list(cleaned_parameters.keys())}"
             )
         try:
-            return tool.run(parameters)
+            return tool.run(cleaned_parameters)
         except UserRefusedError:
             raise
         except Exception as e:
