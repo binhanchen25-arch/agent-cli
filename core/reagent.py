@@ -173,6 +173,12 @@ class ReActAgent:
                     total_calls += 1
                     status.update(f"🔧 Running: {tc.name} ({total_calls} calls)")
 
+                    # 执行工具（含 console.input 确认）前先暂停 spinner，避免终端闪烁。
+                    try:
+                        status.stop()
+                    except Exception:
+                        pass
+
                     try:
                         result = self.tool_registry.execute_tool_by_params(
                             tc.name, tc.arguments
@@ -187,6 +193,11 @@ class ReActAgent:
                         # 用户拒绝后让 LLM 基于已有上下文做收尾（这一步非流式以简化处理）
                         yield self._finish_on_refused(messages)
                         return
+                    finally:
+                        try:
+                            status.start()
+                        except Exception:
+                            pass
 
                     messages.append({
                         "role": "tool",
