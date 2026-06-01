@@ -28,7 +28,10 @@ AGENT_SYSTEM_PROMPT = """你是 MyCLI 的 ReAct Agent，擅长在终端与代码
 - 需要外部信息时再调用工具；不需要就直接回答。
 - 可以在同一轮并行调用多个独立工具以提速。
 - 参数必须具体、可执行，避免宽泛或重复查询。
-- 每个工具都支持 confirm 参数：true=执行前询问用户，false=直接执行。
+- 每次工具调用都必须显式传入 confirm 参数，由你自主判断：
+  · 只读/查询类工具（如 view、grep、glob、tree、web_search、fetch_url、now、echo）→ confirm=false。
+  · 高风险/不可逆操作（如 write_file、edit_file、file_ops、windows_cmd、python_repl、create_docx）→ confirm=true。
+  · 参数不明确或可能误伤多文件/资源时 → confirm=true。
 - 工具失败时先缩小范围重试一次；仍失败则说明原因并给替代方案。
 
 代码库阅读策略：
@@ -174,12 +177,6 @@ class ReActAgent:
                     total_calls += 1
                     status.update(f"🔧 Running: {tc.name} ({total_calls} calls)")
 
-                    # 执行工具（含 console.input 确认）前先暂停 spinner，避免终端闪烁。
-                    try:
-                        status.stop()
-                    except Exception:
-                        pass
-
                     try:
                         result = self.tool_registry.execute_tool_by_params(
                             tc.name, tc.arguments
@@ -194,11 +191,6 @@ class ReActAgent:
                         # 用户拒绝后让 LLM 基于已有上下文做收尾（这一步非流式以简化处理）
                         yield self._finish_on_refused(messages)
                         return
-                    finally:
-                        try:
-                            status.start()
-                        except Exception:
-                            pass
 
                     messages.append({
                         "role": "tool",

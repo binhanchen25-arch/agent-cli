@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from cli.renderer import console
 
-# 默认每次工具调用都需要确认；可被 `\\allow` 命令修改。
-_DEFAULT_TOOL_CONFIRM = True
+# 默认策略：当模型未显式给出 confirm 时，是否需要人工确认。
+# False = 把决策权交给模型；模型不传就直接放行（查询类工具自然不再被打断）。
+# True  = 模型不传时仍兜底询问（更保守）。
+# 可被 `\\allow` 命令修改。
+_DEFAULT_TOOL_CONFIRM = False
 _CONFIRM_PARAM_KEY = "confirm"
 
 
@@ -35,7 +38,12 @@ def _to_bool(value: object) -> bool | None:
 
 
 def should_confirm_tool_call(parameters: dict) -> bool:
-    """计算本次工具调用是否需要确认（调用参数优先于全局默认）。"""
+    """计算本次工具调用是否需要确认。
+
+    决策顺序：
+        1. 模型显式传入 confirm=true/false → 完全听模型的。
+        2. 模型没传 → 走全局默认（默认为 False，即直接放行）。
+    """
     raw = parameters.get(_CONFIRM_PARAM_KEY, None)
     parsed = _to_bool(raw)
     if parsed is None:
