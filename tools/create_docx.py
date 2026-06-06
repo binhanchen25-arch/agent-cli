@@ -11,6 +11,8 @@ from tools.base import Tool, ToolParameter
 class CreateDocxTool(Tool):
     """创建 Word 文档（.docx）。"""
 
+    search_hint = "创建 Word .docx 文档"
+
     def __init__(self) -> None:
         super().__init__(
             name="create_docx",
@@ -42,6 +44,10 @@ class CreateDocxTool(Tool):
                 required=False,
             ),
         ]
+
+    def is_destructive(self, parameters=None) -> bool:
+        # 会覆盖既有 docx 文件。
+        return True
 
     def run(self, parameters: Dict[str, Any]) -> str:
         try:

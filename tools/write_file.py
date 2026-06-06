@@ -11,6 +11,8 @@ from tools.base import Tool, ToolParameter
 class WriteFileTool(Tool):
     """创建或覆盖写入文件内容。"""
 
+    search_hint = "创建或覆盖文件内容"
+
     def __init__(self) -> None:
         super().__init__(
             name="write_file",
@@ -37,6 +39,10 @@ class WriteFileTool(Tool):
                 required=True,
             ),
         ]
+
+    def is_destructive(self, parameters=None) -> bool:
+        # 覆盖既有内容是不可逆的。
+        return True
 
     def run(self, parameters: Dict[str, Any]) -> str:
         path = str(parameters.get("path", "")).strip()

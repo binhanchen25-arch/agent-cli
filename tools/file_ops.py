@@ -12,6 +12,8 @@ from tools.base import Tool, ToolParameter
 class FileOpsTool(Tool):
     """对文件或目录执行 copy / move / delete / rename 操作。"""
 
+    search_hint = "复制/移动/删除/重命名文件或目录"
+
     def __init__(self) -> None:
         super().__init__(
             name="file_ops",
@@ -46,6 +48,13 @@ class FileOpsTool(Tool):
                 required=False,
             ),
         ]
+
+    def is_destructive(self, parameters=None) -> bool:
+        # delete / move / rename 都会改动既有路径；copy 不破坏既有数据。
+        if not parameters:
+            return True  # 信息不足时保守
+        action = str(parameters.get("action", "")).strip().lower()
+        return action in ("delete", "move", "rename")
 
     def run(self, parameters: Dict[str, Any]) -> str:
         action = str(parameters.get("action", "")).strip().lower()

@@ -15,6 +15,8 @@ _MAX_OUTPUT = 5000  # stdout 最大返回字符数
 class PythonReplTool(Tool):
     """在隔离命名空间中执行 Python 代码片段，返回标准输出与结果。"""
 
+    search_hint = "执行 Python 代码片段"
+
     def __init__(self) -> None:
         super().__init__(
             name="python_repl",
@@ -37,6 +39,10 @@ class PythonReplTool(Tool):
                 required=True,
             ),
         ]
+
+    def is_destructive(self, parameters=None) -> bool:
+        # 任意代码执行无法静态判断副作用，按破坏性对待。
+        return True
 
     def run(self, parameters: Dict[str, Any]) -> str:
         code = str(parameters.get("code", "")).strip()

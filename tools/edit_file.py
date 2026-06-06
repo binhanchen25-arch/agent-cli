@@ -11,6 +11,8 @@ from tools.base import Tool, ToolParameter
 class EditFileTool(Tool):
     """在文件中精确替换一段文本（old_str → new_str）。"""
 
+    search_hint = "精确替换文件中的某段文本"
+
     def __init__(self) -> None:
         super().__init__(
             name="edit_file",
@@ -43,6 +45,10 @@ class EditFileTool(Tool):
                 required=True,
             ),
         ]
+
+    def is_destructive(self, parameters=None) -> bool:
+        # 修改文件内容是不可逆的。
+        return True
 
     def run(self, parameters: Dict[str, Any]) -> str:
         path = str(parameters.get("path", "")).strip()

@@ -44,7 +44,19 @@ class ToolParameter(BaseModel):
 
 
 class Tool(ABC):
-    """工具基类：单一工具或可展开为多个子工具。"""
+    """工具基类：单一工具或可展开为多个子工具。
+
+    安全元数据（参考 Claude Code `buildTool()` 的设计）：所有"风险"相关方法
+    默认按最保守（fail-closed）假设返回 False —— 子类显式声明 True 才放开。
+    这样工具作者忘记声明也不会引入风险。
+    """
+
+    # 简短能力描述（≤10 词），未来可用于 ToolSearch 关键词匹配。
+    search_hint: str = ""
+
+    # 是否默认对 LLM 可见。False 表示工具必须通过 `tool_search` 发现后才注入 schema，
+    # 用于压缩超大工具集的上下文体积（参考 Claude Code 的"按需暴露"模式）。
+    always_visible: bool = True
 
     def __init__(self, name: str, description: str, expandable: bool = False):
         self.name = name
@@ -58,6 +70,24 @@ class Tool(ABC):
     @abstractmethod
     def get_parameters(self) -> List[ToolParameter]:
         """返回参数模式列表。"""
+
+    # ── 安全元数据（默认 fail-closed）──
+
+    def is_enabled(self) -> bool:
+        """工具是否在当前环境下可用。默认始终启用。"""
+        return True
+
+    def is_read_only(self, parameters: Optional[Dict[str, Any]] = None) -> bool:
+        """是否为只读操作。默认假设会写入（fail-closed）。"""
+        return False
+
+    def is_concurrency_safe(self, parameters: Optional[Dict[str, Any]] = None) -> bool:
+        """是否可与其他并发安全工具并行执行。默认假设不安全（fail-closed）。"""
+        return False
+
+    def is_destructive(self, parameters: Optional[Dict[str, Any]] = None) -> bool:
+        """是否为不可逆/破坏性操作。被 ToolRegistry 用于兜底确认。默认 False。"""
+        return False
 
     def get_expanded_tools(self) -> Optional[List[Tool]]:
         """可展开工具：从带 @tool_action 的方法生成子工具。"""

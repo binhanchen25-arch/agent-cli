@@ -41,6 +41,8 @@ def get_allow_all_windows_cmd() -> bool:
 class EchoTool(Tool):
     """原样返回输入文本。"""
 
+    search_hint = "回显输入文本、点名测试"
+
     def __init__(self) -> None:
         super().__init__(
             name="echo",
@@ -58,12 +60,20 @@ class EchoTool(Tool):
             )
         ]
 
+    def is_read_only(self, parameters=None) -> bool:
+        return True
+
+    def is_concurrency_safe(self, parameters=None) -> bool:
+        return True
+
     def run(self, parameters: Dict[str, Any]) -> str:
         return str(parameters.get("text", ""))
 
 
 class NowTool(Tool):
     """返回当前本地时间。"""
+
+    search_hint = "获取当前本地时间"
 
     def __init__(self) -> None:
         super().__init__(
@@ -75,12 +85,20 @@ class NowTool(Tool):
     def get_parameters(self) -> List[ToolParameter]:
         return []
 
+    def is_read_only(self, parameters=None) -> bool:
+        return True
+
+    def is_concurrency_safe(self, parameters=None) -> bool:
+        return True
+
     def run(self, parameters: Dict[str, Any]) -> str:
         return datetime.now().isoformat(timespec="seconds")
 
 
 class WindowsCmdTool(Tool):
     """跨平台执行命令（确认逻辑由 ToolRegistry 统一处理）。"""
+
+    search_hint = "在本机终端执行 shell 命令"
 
     def __init__(self) -> None:
         super().__init__(
@@ -101,6 +119,10 @@ class WindowsCmdTool(Tool):
                 required=True,
             )
         ]
+
+    def is_destructive(self, parameters=None) -> bool:
+        # 命令可能做任意事，一律视为不可逆。
+        return True
 
     def run(self, parameters: Dict[str, Any]) -> str:
         command = str(parameters.get("command", "")).strip()
@@ -153,6 +175,8 @@ class WindowsCmdTool(Tool):
 class TreeTool(Tool):
     """列出目录结构树。"""
 
+    search_hint = "查看目录结构树"
+
     def __init__(self) -> None:
         super().__init__(
             name="tree",
@@ -164,6 +188,12 @@ class TreeTool(Tool):
         return [
             ToolParameter(name="input", type="string", description="目录路径，可用 | 分隔深度，如 ./src|3", required=True),
         ]
+
+    def is_read_only(self, parameters=None) -> bool:
+        return True
+
+    def is_concurrency_safe(self, parameters=None) -> bool:
+        return True
 
     def run(self, parameters: Dict[str, Any]) -> str:
         raw = str(parameters.get("input", ".")).strip()
@@ -219,6 +249,8 @@ class TreeTool(Tool):
 class GlobTool(Tool):
     """按模式匹配查找文件。"""
 
+    search_hint = "按 glob 模式查找文件路径"
+
     def __init__(self) -> None:
         super().__init__(
             name="glob",
@@ -230,6 +262,12 @@ class GlobTool(Tool):
         return [
             ToolParameter(name="pattern", type="string", description="glob 模式，如 **/*.py", required=True),
         ]
+
+    def is_read_only(self, parameters=None) -> bool:
+        return True
+
+    def is_concurrency_safe(self, parameters=None) -> bool:
+        return True
 
     def run(self, parameters: Dict[str, Any]) -> str:
         pattern = str(parameters.get("pattern", "")).strip()
@@ -256,6 +294,8 @@ class GlobTool(Tool):
 class GrepTool(Tool):
     """在文件中搜索文本内容。"""
 
+    search_hint = "在文件内容中搜索文本或正则"
+
     def __init__(self) -> None:
         super().__init__(
             name="grep",
@@ -271,6 +311,12 @@ class GrepTool(Tool):
         return [
             ToolParameter(name="input", type="string", description="搜索词，可用 | 分隔 glob 过滤，如 import|**/*.py", required=True),
         ]
+
+    def is_read_only(self, parameters=None) -> bool:
+        return True
+
+    def is_concurrency_safe(self, parameters=None) -> bool:
+        return True
 
     def run(self, parameters: Dict[str, Any]) -> str:
         raw = str(parameters.get("input", "")).strip()
@@ -323,6 +369,8 @@ class GrepTool(Tool):
 class ViewTool(Tool):
     """查看文件内容（支持行范围）。"""
 
+    search_hint = "读取文件内容、支持行范围"
+
     def __init__(self) -> None:
         super().__init__(
             name="view",
@@ -337,6 +385,12 @@ class ViewTool(Tool):
         return [
             ToolParameter(name="input", type="string", description="文件路径，可用 | 分隔行范围，如 src/main.py|10-50", required=True),
         ]
+
+    def is_read_only(self, parameters=None) -> bool:
+        return True
+
+    def is_concurrency_safe(self, parameters=None) -> bool:
+        return True
 
     def run(self, parameters: Dict[str, Any]) -> str:
         raw = str(parameters.get("input", "")).strip()
@@ -383,13 +437,96 @@ class ViewTool(Tool):
 
 def default_tool_registry() -> ToolRegistry:
     reg = ToolRegistry()
+
+    # 立即注册的核心工具（轻量、常用）
     reg.register_many([
         EchoTool(), NowTool(), WindowsCmdTool(),
         TreeTool(), GlobTool(), GrepTool(), ViewTool(),
-        WebSearchTool(),
         WriteFileTool(), EditFileTool(), FileOpsTool(),
         FetchUrlTool(),
         PythonReplTool(),
-        CreateDocxTool(),
     ])
+
+    # 可选依赖工具：用懒加载包装，避免 import 时机过早。
+    # always_visible=True 保留默认行为，只是 import 推迟到首次需要 schema 时。
+    reg.register_lazy(
+        name="web_search",
+        factory=lambda: WebSearchTool(),
+        description="联网搜索（DuckDuckGo）",
+        search_hint="网络搜索、查询资讯",
+        always_visible=True,
+    )
+    reg.register_lazy(
+        name="create_docx",
+        factory=lambda: CreateDocxTool(),
+        description="创建 Word .docx 文档",
+        search_hint="生成 word 文档",
+        always_visible=True,
+    )
+
+    # ToolSearch：在工具数量大（如挂 MCP 后）时让 LLM 按需发现工具。
+    from tools.tool_search import ToolSearchTool
+    reg.register(ToolSearchTool(reg))
+
+    # 从 ~/.mycli/config.json 的 mcp_servers 字段挂载 MCP 服务器（失败仅 warning）
+    try:
+        _load_mcp_servers_from_config(reg)
+    except Exception as e:  # 守住启动路径
+        import sys
+        sys.stderr.write(f"[mcp] 加载 MCP 服务器失败（忽略）：{e}\n")
+
     return reg
+
+
+def _load_mcp_servers_from_config(reg: ToolRegistry) -> None:
+    """从 core.config 读取 mcp_servers 配置并启动注册。
+
+    config 格式（mcp_servers 为列表）：
+        {
+          "mcp_servers": [
+            {
+              "name": "filesystem",
+              "command": "npx",
+              "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+              "env": {},
+              "name_prefix": "fs_",
+              "always_visible": false
+            }
+          ]
+        }
+    """
+    try:
+        from core.config import config as _cfg
+    except Exception:
+        return
+
+    servers = _cfg.get("mcp_servers") or []
+    if not isinstance(servers, list) or not servers:
+        return
+
+    from tools.mcp import McpServerConfig, register_mcp_server
+
+    for item in servers:
+        if not isinstance(item, dict):
+            continue
+        try:
+            cfg = McpServerConfig(
+                name=str(item.get("name", "")) or "mcp",
+                command=str(item.get("command", "")),
+                args=list(item.get("args") or []),
+                env=dict(item.get("env") or {}),
+                timeout=float(item.get("timeout") or 15.0),
+            )
+            if not cfg.command:
+                continue
+            register_mcp_server(
+                reg,
+                cfg,
+                name_prefix=str(item.get("name_prefix") or ""),
+                always_visible=bool(item.get("always_visible", False)),
+            )
+        except Exception as e:
+            import sys
+            sys.stderr.write(
+                f"[mcp] 跳过 server {item.get('name')!r}：{type(e).__name__}: {e}\n"
+            )

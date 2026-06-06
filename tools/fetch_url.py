@@ -29,6 +29,8 @@ def _strip_html(html: str) -> str:
 class FetchUrlTool(Tool):
     """抓取指定 URL 的页面正文内容。"""
 
+    search_hint = "抓取网页正文内容"
+
     def __init__(self) -> None:
         super().__init__(
             name="fetch_url",
@@ -49,6 +51,12 @@ class FetchUrlTool(Tool):
                 required=True,
             ),
         ]
+
+    def is_read_only(self, parameters=None) -> bool:
+        return True
+
+    def is_concurrency_safe(self, parameters=None) -> bool:
+        return True
 
     def run(self, parameters: Dict[str, Any]) -> str:
         url = str(parameters.get("url", "")).strip()

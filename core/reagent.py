@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Callable, Generator, List, Optional
 
 if TYPE_CHECKING:
@@ -28,6 +29,7 @@ AGENT_SYSTEM_PROMPT = """你是 MyCLI 的 ReAct Agent，擅长在终端与代码
 - 需要外部信息时再调用工具；不需要就直接回答。
 - 可以在同一轮并行调用多个独立工具以提速。
 - 参数必须具体、可执行，避免宽泛或重复查询。
+- 不确定是否存在某个能力时，先用 `tool_search` 按关键词检索；命中的工具会自动进入下一轮可用集合。
 - 每次工具调用都必须显式传入 confirm 参数，由你自主判断：
   · 只读/查询类工具（如 view、grep、glob、tree、web_search、fetch_url、now、echo）→ confirm=false。
   · 高风险/不可逆操作（如 write_file、edit_file、file_ops、windows_cmd、python_repl、create_docx）→ confirm=true。
@@ -108,7 +110,6 @@ class ReActAgent:
             return
 
         messages = self._build_initial_messages(question, history=history)
-        tools_schema = self.tool_registry.get_openai_tools_schema()
         total_calls = 0
 
         status_cm = console.status("🤔 Thinking…", spinner="dots")
@@ -125,6 +126,9 @@ class ReActAgent:
                             messages = new_messages
                     except Exception as e:
                         yield f"\n\n> ⚠️ before_step hook 异常已忽略: `{e}`\n\n"
+
+                # 每轮重算 schema：tool_search 可能在上一轮把新工具加入 discovered。
+                tools_schema = self.tool_registry.get_openai_tools_schema()
 
                 # 真流式调用 LLM
                 final_resp = None
@@ -172,31 +176,93 @@ class ReActAgent:
                     ],
                 })
 
-                # 按序执行每个 tool call
-                for tc in tool_calls:
-                    total_calls += 1
-                    status.update(f"🔧 Running: {tc.name} ({total_calls} calls)")
-
-                    try:
-                        result = self.tool_registry.execute_tool_by_params(
-                            tc.name, tc.arguments
+                # 按 partition 调度：相邻 concurrency_safe 的工具合并为一个并发 batch；
+                # 其他工具串行。任一被拒绝（UserRefusedError）则按原逻辑收尾。
+                batches = self.tool_registry.partition_tool_calls(tool_calls)
+                for is_concurrent, batch in batches:
+                    if is_concurrent and len(batch) > 1:
+                        # 并发批
+                        names_str = ", ".join(tc.name for tc in batch)
+                        total_calls += len(batch)
+                        status.update(
+                            f"🔧 Running {len(batch)} tools in parallel: {names_str}"
                         )
-                    except UserRefusedError as e:
+
+                        results: List = [None] * len(batch)
+                        with ThreadPoolExecutor(
+                            max_workers=min(10, len(batch))
+                        ) as executor:
+                            future_to_idx = {
+                                executor.submit(
+                                    self.tool_registry.execute_tool_by_params,
+                                    tc.name,
+                                    tc.arguments,
+                                ): i
+                                for i, tc in enumerate(batch)
+                            }
+                            for future in as_completed(future_to_idx):
+                                idx = future_to_idx[future]
+                                try:
+                                    results[idx] = future.result()
+                                except UserRefusedError as e:
+                                    # 并发模式下 concurrency_safe 工具一般不会触发确认弹窗，
+                                    # 但若用户在 hooks 中改变了策略，保留兜底处理。
+                                    results[idx] = e
+
+                        # 先把所有结果按原顺序追加（保证 tool_call_id 与 batch 顺序一致），
+                        # 再检查是否有拒绝事件。
+                        refused_idx = -1
+                        for i, (tc, result) in enumerate(zip(batch, results)):
+                            if isinstance(result, UserRefusedError):
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tc.id,
+                                    "content": f"用户拒绝: {result.detail}",
+                                })
+                                if refused_idx < 0:
+                                    refused_idx = i
+                            else:
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tc.id,
+                                    "content": result,
+                                })
+
+                        if refused_idx >= 0:
+                            yield (
+                                f"\n> ❌ 用户拒绝执行 "
+                                f"`{batch[refused_idx].name}`\n\n"
+                            )
+                            yield self._finish_on_refused(messages)
+                            return
+                        continue
+
+                    # 串行批：单个工具或非并发安全
+                    for tc in batch:
+                        total_calls += 1
+                        status.update(
+                            f"🔧 Running: {tc.name} ({total_calls} calls)"
+                        )
+
+                        try:
+                            result = self.tool_registry.execute_tool_by_params(
+                                tc.name, tc.arguments
+                            )
+                        except UserRefusedError as e:
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": f"用户拒绝: {e.detail}",
+                            })
+                            yield f"\n> ❌ 用户拒绝执行 `{tc.name}`\n\n"
+                            yield self._finish_on_refused(messages)
+                            return
+
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tc.id,
-                            "content": f"用户拒绝: {e.detail}",
+                            "content": result,
                         })
-                        yield f"\n> ❌ 用户拒绝执行 `{tc.name}`\n\n"
-                        # 用户拒绝后让 LLM 基于已有上下文做收尾（这一步非流式以简化处理）
-                        yield self._finish_on_refused(messages)
-                        return
-
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    })
 
             yield "\n\n抱歉，在限定步数内未能完成任务。"
         finally:

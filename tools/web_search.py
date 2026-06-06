@@ -10,6 +10,8 @@ from tools.base import Tool, ToolParameter
 class WebSearchTool(Tool):
     """使用 DuckDuckGo 搜索网络内容，返回标题、摘要和链接。"""
 
+    search_hint = "联网搜索网络信息"
+
     def __init__(self) -> None:
         super().__init__(
             name="web_search",
@@ -36,6 +38,12 @@ class WebSearchTool(Tool):
                 required=False,
             ),
         ]
+
+    def is_read_only(self, parameters=None) -> bool:
+        return True
+
+    def is_concurrency_safe(self, parameters=None) -> bool:
+        return True
 
     def run(self, parameters: Dict[str, Any]) -> str:
         try:
