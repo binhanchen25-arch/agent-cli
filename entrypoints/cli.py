@@ -31,7 +31,7 @@ _HELP_TEXT = """🤖 MyCLI - 终端 AI 助手
     mycli --config-path   打印配置文件路径
     mycli sdk-schema      打印 Agent SDK 公共表面的 JSON Schema
 
-更多 REPL 内命令（如 \\react、\\allow、\\model）请在交互模式下输入 \\help 查看。
+更多 REPL 内命令（如 /react、/allow、/model）请在交互模式下输入 /help 查看。
 """
 
 
