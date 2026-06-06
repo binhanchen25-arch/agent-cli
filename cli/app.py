@@ -48,17 +48,17 @@ class ChatApp:
         command = parts[0].lower()
         args = parts[1] if len(parts) > 1 else ""
 
-        if command == "\\exit":
+        if command == "/exit":
             return False
-        elif command == "\\help":
+        elif command == "/help":
             self._show_help()
-        elif command == "\\clear":
+        elif command == "/clear":
             self.messages = self.messages[:1]  # 保留 system prompt
             clear_screen()
             print_system("对话已清空")
-        elif command == "\\config":
+        elif command == "/config":
             print_config(self.config)
-        elif command == "\\allow":
+        elif command == "/allow":
             allow_arg = args.strip().lower()
             if not allow_arg or allow_arg == "all":
                 set_allow_all_windows_cmd(True)
@@ -67,18 +67,18 @@ class ChatApp:
                 set_allow_all_windows_cmd(False)
                 print_system("已关闭 allow：所有工具默认执行前会弹出 Yes/No 确认。")
             else:
-                print_system("用法: \\allow  （可选: \\allow all, \\allow off）")
-        elif command in ("\\chat", "\\normal"):
+                print_system("用法: /allow  （可选: /allow all, /allow off）")
+        elif command in ("/chat", "/normal"):
             self.llm = self.base_llm
             print_system("已切换到普通聊天模式（LLM 直接对话）")
-        elif command == "\\model":
+        elif command == "/model":
             if args:
                 self.config["model"] = args
                 save_config(self.config)
                 print_system(f"模型已切换为: {args}")
             else:
                 print_system(f"当前模型: {self.config['model']}")
-        elif command == "\\apikey":
+        elif command == "/apikey":
             if args:
                 self.config["api_key"] = args
                 save_config(self.config)
@@ -90,15 +90,15 @@ class ChatApp:
                     masked = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
                     print_system(f"当前 API Key: {masked}")
                 else:
-                    print_system("API Key 未设置。用法: \\apikey <your-key>")
-        elif command == "\\base_url":
+                    print_system("API Key 未设置。用法: /apikey <your-key>")
+        elif command == "/base_url":
             if args:
                 self.config["base_url"] = args
                 save_config(self.config)
                 print_system(f"Base URL 已更新为: {args}")
             else:
                 print_system(f"当前 Base URL: {self.config.get('base_url', '(未设置)')}")
-        elif command == "\\temperature":
+        elif command == "/temperature":
             if args:
                 try:
                     val = float(args)
@@ -109,10 +109,10 @@ class ChatApp:
                         save_config(self.config)
                         print_system(f"temperature 已设置为: {val}")
                 except ValueError:
-                    print_error("temperature 必须是数字，如 \\temperature 0.8")
+                    print_error("temperature 必须是数字，如 /temperature 0.8")
             else:
                 print_system(f"当前 temperature: {self.config.get('temperature', 0.8)}")
-        elif command == "\\max_tokens":
+        elif command == "/max_tokens":
             if args:
                 try:
                     val = int(args)
@@ -123,10 +123,10 @@ class ChatApp:
                         save_config(self.config)
                         print_system(f"max_tokens 已设置为: {val}")
                 except ValueError:
-                    print_error("max_tokens 必须是整数，如 \\max_tokens 4096")
+                    print_error("max_tokens 必须是整数，如 /max_tokens 4096")
             else:
                 print_system(f"当前 max_tokens: {self.config.get('max_tokens', 2048)}")
-        elif command == "\\system":
+        elif command == "/system":
             if args:
                 self.config["system_prompt"] = args
                 self.messages = [{"role": "system", "content": args}]
@@ -134,19 +134,19 @@ class ChatApp:
                 print_system("系统提示词已更新")
             else:
                 print_system(f"当前系统提示词: {self.config.get('system_prompt', '(无)')}")
-        elif command == "\\history":
+        elif command == "/history":
             self._show_history()
-        elif command == "\\context":
+        elif command == "/context":
             self._render_context_usage()
-        elif command == "\\react":
-            # \react：把当前 llm 切换成 ReAct agent（包装成与 ChatApp 兼容的 stream/invoke 接口）
+        elif command == "/react":
+            # /react：把当前 llm 切换成 ReAct agent（包装成与 ChatApp 兼容的 stream/invoke 接口）
             self.llm = ReActChatLLM(ReActAgent("MyCLI", self.base_llm))
             if args.strip():
                 self._run_react(args.strip())
             else:
-                print_system("已切换到 ReAct 模式（后续输入将走 ReActAgent；用 \\chat 切回普通聊天）")
+                print_system("已切换到 ReAct 模式（后续输入将走 ReActAgent；用 /chat 切回普通聊天）")
         else:
-            print_error(f"未知命令: {command}，输入 \\help 查看帮助")
+            print_error(f"未知命令: {command}，输入 /help 查看帮助")
 
         return True
 
@@ -168,7 +168,7 @@ class ChatApp:
 
     def _run_react(self, question: str):
         """ReAct 模式：多步推理 + 工具调用，结果以 Markdown 面板展示。"""
-        print_user_message(f"\\react {question}")
+        print_user_message(f"/react {question}")
         agent = ReActAgent("MyCLI", self.base_llm)
         stream = agent.run_stream(question, history=self.messages)
         answer = render_stream(stream)
@@ -190,7 +190,7 @@ class ChatApp:
     def chat(self, user_input: str):
         """处理一轮对话"""
         self.messages.append({"role": "user", "content": user_input})
-        print_user_message(user_input)
+        # print_user_message(user_input)
 
         if self.use_demo:
             stream = demo_stream(user_input)
@@ -216,20 +216,20 @@ class ChatApp:
                 if not user_input:
                     continue
 
-                if user_input.startswith("\\"):
+                if user_input.startswith("/"):
                     if not self.handle_command(user_input):
                         print_system("再见！👋")
                         break
                 else:
                     stripped = user_input.strip()
                     if stripped.lower() == "react":
-                        print_system("请使用 \\react 进入 ReAct 模式")
+                        print_system("请使用 /react 进入 ReAct 模式")
                         continue
                     self.chat(user_input)
 
             except KeyboardInterrupt:
-                # 提示用 \exit 退出（流式中的 Ctrl+C 已由 render_stream 处理）
-                print_system("按 Ctrl+C 已取消；输入 \\exit 退出。")
+                # 提示用 /exit 退出（流式中的 Ctrl+C 已由 render_stream 处理）
+                print_system("按 Ctrl+C 已取消；输入 /exit 退出。")
                 continue
             except EOFError:
                 break

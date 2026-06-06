@@ -105,7 +105,7 @@ class WindowsCmdTool(Tool):
             name="windows_cmd",
             description=(
                 "在本机终端执行命令：Windows 使用 cmd.exe，macOS/Linux 使用 bash。"
-                "是否弹出确认由工具参数 confirm 与全局 `\\allow` 设置共同决定。"
+                "是否弹出确认由工具参数 confirm 与全局 `/allow` 设置共同决定。"
             ),
             expandable=False,
         )

@@ -9,7 +9,7 @@ from cli.renderer import console
 # 默认策略：当模型未显式给出 confirm 时，是否需要人工确认。
 # False = 把决策权交给模型；模型不传就直接放行（查询类工具自然不再被打断）。
 # True  = 模型不传时仍兜底询问（更保守）。
-# 可被 `\\allow` 命令修改。
+# 可被 `/allow` 命令修改。
 _DEFAULT_TOOL_CONFIRM = False
 _CONFIRM_PARAM_KEY = "confirm"
 
