@@ -9,7 +9,7 @@ from cli.context_usage import calculate_context_usage
 from cli.renderer import (
     print_welcome, print_user_message, render_stream,
     print_system, print_error, print_config, clear_screen, console,
-    exit_fullscreen, set_terminal_title,
+    exit_fullscreen,
 )
 
 from core.config import load_config, save_config, ensure_dirs, HISTORY_FILE
@@ -282,9 +282,7 @@ class ChatApp:
         )
 
     def run(self):
-        print_welcome()
-        set_terminal_title(f"MyCLI | Session {self.cli_session_id}")
-        short_session = self.cli_session_id[:8]
+        print_welcome(self.cli_session_id)
 
         if self.use_demo:
             print_system("演示模式（未检测到 API Key，设置 OPENAI_API_KEY 环境变量以连接 AI）")
@@ -292,7 +290,7 @@ class ChatApp:
         while True:
             try:
                 user_input = self.session.prompt(
-                    [("class:prompt", f"  [{short_session}] ❯ ")],
+                    [("class:prompt", "  ❯ ")],
                 ).strip()
 
                 if not user_input:

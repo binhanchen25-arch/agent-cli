@@ -48,13 +48,16 @@ def exit_fullscreen():
     return
 
 
-def print_welcome():
+def print_welcome(session_id: str | None = None):
     set_terminal_title(APP_TITLE)
     enter_fullscreen()
+    session_line = ""
+    if session_id:
+        session_line = f"\n║  Session: {session_id[:28]:<30}║"
     welcome = """
 ╔══════════════════════════════════════════╗
 ║        🤖  MyCLI - 终端 AI 助手         ║
-║                                          ║
+║                                          ║""" + session_line + """
 ║  输入问题开始对话，输入 \\help 查看帮助   ║
 ║  按 Ctrl+C 或输入 \\exit 退出            ║
 ╚══════════════════════════════════════════╝"""
