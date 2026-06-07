@@ -283,6 +283,8 @@ class ChatApp:
 
     def run(self):
         print_welcome()
+        set_terminal_title(f"MyCLI | Session {self.cli_session_id}")
+        short_session = self.cli_session_id[:8]
 
         if self.use_demo:
             print_system("演示模式（未检测到 API Key，设置 OPENAI_API_KEY 环境变量以连接 AI）")
@@ -290,7 +292,7 @@ class ChatApp:
         while True:
             try:
                 user_input = self.session.prompt(
-                    [("class:prompt", "  ❯ ")],
+                    [("class:prompt", f"  [{short_session}] ❯ ")],
                 ).strip()
 
                 if not user_input:
