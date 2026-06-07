@@ -10,6 +10,10 @@ from memory.manager import (
     reset_memory_write_marker,
     resolve_memory_file,
 )
+from memory.session_writer import (
+    build_session_memory_state,
+    schedule_session_memory_extract,
+)
 
 __all__ = [
     "MEMORY_FILE_MAP",
@@ -22,4 +26,6 @@ __all__ = [
     "read_text_with_lock",
     "reset_memory_write_marker",
     "resolve_memory_file",
+    "build_session_memory_state",
+    "schedule_session_memory_extract",
 ]

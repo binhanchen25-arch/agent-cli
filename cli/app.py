@@ -1,6 +1,8 @@
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
+from datetime import datetime
+import uuid
 
 from cli.completer import CliCompleter
 from cli.context_usage import calculate_context_usage
@@ -13,7 +15,11 @@ from cli.renderer import (
 from core.config import load_config, save_config, ensure_dirs, HISTORY_FILE
 from core.llm import OpenAICompatLLM, demo_stream
 from core.reagent import ReActAgent, ReActChatLLM
-from memory import reset_memory_write_marker
+from memory import (
+    build_session_memory_state,
+    reset_memory_write_marker,
+    schedule_session_memory_extract,
+)
 from memory.auto_writer import schedule_auto_memory_write
 from runtime_log import get_log_file_path, is_runtime_log_enabled, log_event
 from tools.builtin import default_tool_registry, set_allow_all_windows_cmd
@@ -31,6 +37,8 @@ class ChatApp:
         self.llm = self.base_llm
         self.messages = []  # 对话历史
         self.use_demo = not self.config.get("api_key")
+        self.cli_session_id = f"{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:8]}"
+        self.session_memory_state = build_session_memory_state(self.cli_session_id)
 
         if self.config.get("system_prompt"):
             self.messages.append({
@@ -201,6 +209,7 @@ class ChatApp:
             f"({stats['context_percent']}%), "
             f"剩余 {int(stats['remaining_tokens'])} tokens"
         )
+        return stats
 
     def _run_react(self, question: str):
         """ReAct 模式：多步推理 + 工具调用，结果以 Markdown 面板展示。"""
@@ -222,7 +231,14 @@ class ChatApp:
             assistant_text=answer,
             memory_type="auto",
         )
-        self._render_context_usage()
+        stats = self._render_context_usage()
+        schedule_session_memory_extract(
+            llm=self.base_llm,
+            messages=self.messages,
+            token_count=int(stats.get("token_count", 0)),
+            turn_count=len(self.messages),
+            state=self.session_memory_state,
+        )
 
     def _show_history(self):
         if len(self.messages) <= 1:
@@ -256,7 +272,14 @@ class ChatApp:
             memory_type="auto",
         )
         self._log_event("chat_finished", reply_preview=reply[:120], total_messages=len(self.messages))
-        self._render_context_usage()
+        stats = self._render_context_usage()
+        schedule_session_memory_extract(
+            llm=self.base_llm,
+            messages=self.messages,
+            token_count=int(stats.get("token_count", 0)),
+            turn_count=len(self.messages),
+            state=self.session_memory_state,
+        )
 
     def run(self):
         print_welcome()

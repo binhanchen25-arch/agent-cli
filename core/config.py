@@ -19,6 +19,10 @@ DEFAULT_CONFIG: dict = {
     "runtime_log_enabled": False,
     "runtime_log_file": ".mycli/runtime.log",
     "auto_memory_type": "feedback_testing",
+    "session_memory_first_extract_tokens": 10000,
+    "session_memory_delta_tokens": 2000,
+    "session_memory_delta_turns": 4,
+    "session_memory_delta_seconds": 180,
     "system_prompt": (
         "你是 MyCLI 的终端 AI 助手。目标是提供准确、可执行、风险可控的帮助。\n"
         "\n"
@@ -50,6 +54,10 @@ _ENV_MAPPING: Dict[str, Tuple[Callable[[str], object], Tuple[str, ...]]] = {
                             ("MYCLI_RUNTIME_LOG_ENABLED", "RUNTIME_LOG_ENABLED")),
     "runtime_log_file": (str, ("MYCLI_RUNTIME_LOG_FILE", "RUNTIME_LOG_FILE")),
     "auto_memory_type": (str, ("MYCLI_AUTO_MEMORY_TYPE", "AUTO_MEMORY_TYPE")),
+    "session_memory_first_extract_tokens": (int, ("MYCLI_SESSION_MEMORY_FIRST_EXTRACT_TOKENS",)),
+    "session_memory_delta_tokens": (int, ("MYCLI_SESSION_MEMORY_DELTA_TOKENS",)),
+    "session_memory_delta_turns": (int, ("MYCLI_SESSION_MEMORY_DELTA_TURNS",)),
+    "session_memory_delta_seconds": (int, ("MYCLI_SESSION_MEMORY_DELTA_SECONDS",)),
     "system_prompt": (str,   ("OPENAI_SYSTEM_PROMPT", "SYSTEM_PROMPT", "system_prompt")),
 }
 
