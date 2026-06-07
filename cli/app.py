@@ -13,6 +13,8 @@ from cli.renderer import (
 from core.config import load_config, save_config, ensure_dirs, HISTORY_FILE
 from core.llm import OpenAICompatLLM, demo_stream
 from core.reagent import ReActAgent, ReActChatLLM
+from memory import reset_memory_write_marker
+from memory.auto_writer import schedule_auto_memory_write
 from runtime_log import get_log_file_path, is_runtime_log_enabled, log_event
 from tools.builtin import default_tool_registry, set_allow_all_windows_cmd
 
@@ -202,6 +204,7 @@ class ChatApp:
 
     def _run_react(self, question: str):
         """ReAct 模式：多步推理 + 工具调用，结果以 Markdown 面板展示。"""
+        reset_memory_write_marker()
         print_user_message(f"/react {question}")
         registry = default_tool_registry(
             with_agents=True,
@@ -213,6 +216,12 @@ class ChatApp:
         answer = render_stream(stream)
         self.messages.append({"role": "user", "content": f"[ReAct] {question}"})
         self.messages.append({"role": "assistant", "content": answer})
+        schedule_auto_memory_write(
+            llm=self.base_llm,
+            user_text=question,
+            assistant_text=answer,
+            memory_type="auto",
+        )
         self._render_context_usage()
 
     def _show_history(self):
@@ -228,6 +237,7 @@ class ChatApp:
 
     def chat(self, user_input: str):
         """处理一轮对话"""
+        reset_memory_write_marker()
         self.messages.append({"role": "user", "content": user_input})
         self._log_event("chat_started", input_preview=user_input[:120], use_demo=self.use_demo)
         # print_user_message(user_input)
@@ -239,6 +249,12 @@ class ChatApp:
 
         reply = render_stream(stream)
         self.messages.append({"role": "assistant", "content": reply})
+        schedule_auto_memory_write(
+            llm=self.base_llm,
+            user_text=user_input,
+            assistant_text=reply,
+            memory_type="auto",
+        )
         self._log_event("chat_finished", reply_preview=reply[:120], total_messages=len(self.messages))
         self._render_context_usage()
 

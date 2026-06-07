@@ -18,6 +18,7 @@ DEFAULT_CONFIG: dict = {
     "temperature": 0.8,
     "runtime_log_enabled": False,
     "runtime_log_file": ".mycli/runtime.log",
+    "auto_memory_type": "feedback_testing",
     "system_prompt": (
         "你是 MyCLI 的终端 AI 助手。目标是提供准确、可执行、风险可控的帮助。\n"
         "\n"
@@ -48,6 +49,7 @@ _ENV_MAPPING: Dict[str, Tuple[Callable[[str], object], Tuple[str, ...]]] = {
     "runtime_log_enabled": (lambda v: str(v).strip().lower() in ("1", "true", "yes", "on"),
                             ("MYCLI_RUNTIME_LOG_ENABLED", "RUNTIME_LOG_ENABLED")),
     "runtime_log_file": (str, ("MYCLI_RUNTIME_LOG_FILE", "RUNTIME_LOG_FILE")),
+    "auto_memory_type": (str, ("MYCLI_AUTO_MEMORY_TYPE", "AUTO_MEMORY_TYPE")),
     "system_prompt": (str,   ("OPENAI_SYSTEM_PROMPT", "SYSTEM_PROMPT", "system_prompt")),
 }
 
