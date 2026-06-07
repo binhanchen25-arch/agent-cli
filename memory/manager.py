@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import threading
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 MEMORY_FILE_MAP: Dict[str, str] = {
     "user_role": "user_role.md",
@@ -28,29 +28,19 @@ def _sanitize_segment(segment: str) -> str:
     return cleaned or "_"
 
 
-def _project_parts_from_cwd(cwd: Path) -> List[str]:
-    resolved = cwd.resolve()
-
-    parts: List[str] = []
-    drive = resolved.drive.rstrip(":\\/")
-    if drive:
-        parts.append(_sanitize_segment(drive))
-
-    for part in resolved.parts:
-        if part in ("/", "\\"):
-            continue
-        if part == resolved.drive:
-            continue
-        parts.append(_sanitize_segment(part))
-
-    return parts or ["default_project"]
+def _project_key_from_cwd(cwd: Path) -> str:
+    """把 cwd 归一成单个字符串 key（不拆多级目录）。"""
+    resolved = str(cwd.resolve())
+    # 路径分隔符统一替换为双下划线，避免在 projects 下产生层级。
+    normalized = resolved.replace("\\", "__").replace("/", "__")
+    return _sanitize_segment(normalized) or "default_project"
 
 
 def get_project_memory_dir(cwd: Path | None = None) -> Path:
     """返回 ~/.mycli/projects/<cwd>/memory 路径（跨平台）。"""
     current = Path.cwd() if cwd is None else Path(cwd)
-    project_parts = _project_parts_from_cwd(current)
-    return Path.home() / ".mycli" / "projects" / Path(*project_parts) / "memory"
+    project_key = _project_key_from_cwd(current)
+    return Path.home() / ".mycli" / "projects" / project_key / "memory"
 
 
 def ensure_cli_memory_structure(cwd: Path | None = None) -> Path:
