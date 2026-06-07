@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 
 _WORD_RE = re.compile(r"[\w\u4e00-\u9fff]+")
+_NAME_SPLIT_RE = re.compile(r"[_\-\.]+|(?<=[a-z0-9])(?=[A-Z])")
 
 
 def _tokenize(text: str) -> List[str]:
@@ -28,25 +29,46 @@ def _tokenize(text: str) -> List[str]:
     return [t.lower() for t in _WORD_RE.findall(text or "")]
 
 
+def _name_parts(name: str) -> List[str]:
+    """把工具名拆成小段（snake_case / kebab-case / dot.case / camelCase / mcp__x__y）。"""
+    parts = [p.lower() for p in _NAME_SPLIT_RE.split(name) if p]
+    return parts
+
+
 def _score(query_tokens: List[str], meta: Dict[str, Any]) -> int:
-    """对一条工具元数据按关键词命中数打分。"""
-    haystack_parts = [
-        meta.get("name") or "",
-        meta.get("description") or "",
-        meta.get("search_hint") or "",
-    ]
-    haystack = " ".join(haystack_parts).lower()
-    haystack_tokens = set(_tokenize(haystack))
+    """对一条工具元数据按 4 档权重打分（参考 Claude Code ToolSearch）。
+
+    权重设计（高 → 低）：
+      - name 段精确匹配（每命中一段 +10）
+      - name 包含匹配 / 段包含子串（+5）
+      - search_hint 匹配（+4）
+      - description 匹配（+2）
+
+    Deferred 工具额外 +1，鼓励在结果里优先被发现。
+    """
+    name = (meta.get("name") or "").lower()
+    name_parts = _name_parts(meta.get("name") or "")
+    name_parts_set = set(name_parts)
+    hint = (meta.get("search_hint") or "").lower()
+    desc = (meta.get("description") or "").lower()
+    hint_tokens = set(_tokenize(hint))
+    desc_tokens = set(_tokenize(desc))
 
     score = 0
     for q in query_tokens:
         if not q:
             continue
-        # 子串匹配比 token 精确匹配更宽容（处理 "写文件" vs "write_file"）
-        if q in haystack:
+        if q in name_parts_set:
+            score += 10
+        elif q in name or any(q in p for p in name_parts):
+            score += 5
+        if q in hint_tokens or q in hint:
+            score += 4
+        if q in desc_tokens or q in desc:
             score += 2
-        if q in haystack_tokens:
-            score += 1
+
+    if score > 0 and not meta.get("visible", True):
+        score += 1  # deferred bonus
     return score
 
 
@@ -62,7 +84,10 @@ class ToolSearchTool(Tool):
             description=(
                 "搜索可用工具列表。返回与关键词最相关的若干工具（名称、描述、参数）。"
                 "命中的工具会自动注入下一轮的工具集合，模型可直接按返回的 schema 调用。"
-                "适用场景：工具很多时定位合适的工具、不确定是否存在某能力时先搜索。"
+                "用法：\n"
+                "  · 关键词搜索：query=\"读取文件\" / query=\"slack\"\n"
+                "  · 精确选择已知工具：query=\"select:foo,bar\"（按名称直接加载）\n"
+                "适用场景：工具很多时定位合适的工具、`<available-deferred-tools>` 里看到名字但不知道参数。"
             ),
             expandable=False,
         )
@@ -73,13 +98,16 @@ class ToolSearchTool(Tool):
             ToolParameter(
                 name="query",
                 type="string",
-                description="搜索关键词，支持中英文（如 '读取文件'、'mcp'、'web'）。",
+                description=(
+                    "搜索关键词，支持中英文（如 '读取文件'、'mcp'、'web'）；"
+                    "或 'select:工具名1,工具名2' 直接按名称加载多个已知工具。"
+                ),
                 required=True,
             ),
             ToolParameter(
                 name="k",
                 type="integer",
-                description="最多返回多少条结果，默认 5，最大 20。",
+                description="最多返回多少条结果，默认 5，最大 20。仅对关键词模式有效。",
                 required=False,
             ),
         ]
@@ -100,6 +128,52 @@ class ToolSearchTool(Tool):
         except (TypeError, ValueError):
             k = 5
 
+        # 模式 1：select:Name1,Name2 — 精确按名加载（不评分、不限 k）
+        if query.lower().startswith("select:"):
+            return self._run_select(query[len("select:"):])
+
+        # 模式 2：关键词搜索
+        return self._run_keyword(query, k)
+
+    def _run_select(self, names_str: str) -> str:
+        names = [n.strip() for n in names_str.split(",") if n.strip()]
+        if not names:
+            return "select: 后面至少需要一个工具名。例如 select:web_search,view"
+
+        all_meta = {m["name"]: m for m in self._registry.list_all_meta()}
+        results: List[Dict[str, Any]] = []
+        unknown: List[str] = []
+        for name in names:
+            meta = all_meta.get(name)
+            if meta is None:
+                unknown.append(name)
+                continue
+            tool = self._registry.get_tool(name)  # 触发懒加载
+            item: Dict[str, Any] = {
+                "name": name,
+                "description": meta.get("description") or "",
+                "search_hint": meta.get("search_hint") or "",
+                "loaded": tool is not None,
+            }
+            if tool is not None:
+                item["parameters"] = tool.to_openai_schema()["function"]["parameters"]
+            elif meta.get("error"):
+                item["error"] = meta["error"]
+            results.append(item)
+
+        added = self._registry.mark_discovered([m["name"] for m in results])
+        payload: Dict[str, Any] = {
+            "mode": "select",
+            "requested": names,
+            "matched": len(results),
+            "newly_discovered": added,
+            "results": results,
+        }
+        if unknown:
+            payload["unknown"] = unknown
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def _run_keyword(self, query: str, k: int) -> str:
         query_tokens = _tokenize(query)
         all_meta = self._registry.list_all_meta()
 
@@ -139,12 +213,18 @@ class ToolSearchTool(Tool):
 
         if not results:
             return json.dumps(
-                {"query": query, "matched": 0, "note": "未找到与关键词匹配的工具。"},
+                {
+                    "mode": "keyword",
+                    "query": query,
+                    "matched": 0,
+                    "note": "未找到与关键词匹配的工具。可尝试更宽泛的词，或用 select:工具名 精确加载。",
+                },
                 ensure_ascii=False,
                 indent=2,
             )
 
         payload = {
+            "mode": "keyword",
             "query": query,
             "matched": len(results),
             "newly_discovered": added,

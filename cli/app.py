@@ -13,7 +13,7 @@ from cli.renderer import (
 from core.config import load_config, save_config, ensure_dirs, HISTORY_FILE
 from core.llm import OpenAICompatLLM, demo_stream
 from core.reagent import ReActAgent, ReActChatLLM
-from tools.builtin import set_allow_all_windows_cmd
+from tools.builtin import default_tool_registry, set_allow_all_windows_cmd
 
 prompt_style = Style.from_dict({
     "prompt": "ansicyan bold",
@@ -140,7 +140,11 @@ class ChatApp:
             self._render_context_usage()
         elif command == "/react":
             # /react：把当前 llm 切换成 ReAct agent（包装成与 ChatApp 兼容的 stream/invoke 接口）
-            self.llm = ReActChatLLM(ReActAgent("MyCLI", self.base_llm))
+            # 默认带 with_agents=True，允许主 Agent 通过 `agent` 工具派遣子 Agent。
+            registry = default_tool_registry(with_agents=True, base_llm=self.base_llm)
+            self.llm = ReActChatLLM(
+                ReActAgent("MyCLI", self.base_llm, tool_registry=registry)
+            )
             if args.strip():
                 self._run_react(args.strip())
             else:
@@ -169,7 +173,8 @@ class ChatApp:
     def _run_react(self, question: str):
         """ReAct 模式：多步推理 + 工具调用，结果以 Markdown 面板展示。"""
         print_user_message(f"/react {question}")
-        agent = ReActAgent("MyCLI", self.base_llm)
+        registry = default_tool_registry(with_agents=True, base_llm=self.base_llm)
+        agent = ReActAgent("MyCLI", self.base_llm, tool_registry=registry)
         stream = agent.run_stream(question, history=self.messages)
         answer = render_stream(stream)
         self.messages.append({"role": "user", "content": f"[ReAct] {question}"})

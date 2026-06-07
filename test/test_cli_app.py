@@ -75,14 +75,23 @@ class ChatAppTests(unittest.TestCase):
     def test_react_command_switches_llm_wrapper(self):
         fake_agent = object()
         fake_wrapper = object()
+        fake_registry = MagicMock()
 
         with patch("cli.app.ReActAgent", return_value=fake_agent) as mock_agent_cls, patch(
             "cli.app.ReActChatLLM", return_value=fake_wrapper
-        ) as mock_wrapper_cls:
+        ) as mock_wrapper_cls, patch(
+            "cli.app.default_tool_registry", return_value=fake_registry
+        ) as mock_registry_factory:
             keep_running = self.app.handle_command("/react")
 
         self.assertTrue(keep_running)
-        mock_agent_cls.assert_called_once_with("MyCLI", self.app.base_llm)
+        # /react 现在会带上 AgentTool（with_agents=True）和共享 base_llm
+        mock_registry_factory.assert_called_once_with(
+            with_agents=True, base_llm=self.app.base_llm
+        )
+        mock_agent_cls.assert_called_once_with(
+            "MyCLI", self.app.base_llm, tool_registry=fake_registry
+        )
         mock_wrapper_cls.assert_called_once_with(fake_agent)
         self.assertIs(self.app.llm, fake_wrapper)
 

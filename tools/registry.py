@@ -184,19 +184,45 @@ class ToolRegistry:
             })
         return out
 
+    def list_deferred_tools(self) -> List[Dict[str, str]]:
+        """返回当前 "存在但对 LLM 不可见" 的工具名单。
+
+        用于在每轮请求前向 system prompt 注入 ``<available-deferred-tools>``
+        提醒块，让模型知道存在哪些可被 `tool_search` 发现的工具。
+        只返回轻量字段（name + search_hint/description 摘要），不返回 schema。
+        """
+        out: List[Dict[str, str]] = []
+        for meta in self.list_all_meta():
+            if meta.get("visible"):
+                continue
+            if meta.get("error"):
+                continue  # 加载失败的不必告诉模型
+            hint = (meta.get("search_hint") or meta.get("description") or "").strip()
+            # 一句话限长，避免序列到 prompt 里占太多 token
+            if len(hint) > 80:
+                hint = hint[:77] + "…"
+            out.append({"name": meta["name"], "hint": hint})
+        out.sort(key=lambda x: x["name"])
+        return out
+
     # ── 公共 schema / 描述 ──
 
     def get_openai_tools_schema(self) -> List[Dict[str, Any]]:
         """返回所有已启用且对当前轮可见的工具 schema。
 
+        按 ``tool.name`` 排序，以最大化服务端 prompt cache 命中率
+        （tools 列表顺序变化会使 cache key 失效）。
+
         注意：本方法应在 ReActAgent 每一步发请求前重新调用 —— `tool_search`
         触发 `mark_discovered()` 后，下一轮 schema 才会包含新发现的工具。
         """
-        return [
+        schemas = [
             t.to_openai_schema()
             for t in self._iter_visible_tools()
             if t.is_enabled()
         ]
+        schemas.sort(key=lambda s: s["function"]["name"])
+        return schemas
 
     def get_tools_description(self) -> str:
         tools = list(self._iter_visible_tools())

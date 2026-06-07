@@ -435,7 +435,21 @@ class ViewTool(Tool):
         return header + "\n" + "\n".join(numbered)
 
 
-def default_tool_registry() -> ToolRegistry:
+def default_tool_registry(
+    *,
+    with_agents: bool = False,
+    base_llm: Any = None,
+) -> ToolRegistry:
+    """构造默认工具注册表。
+
+    Args:
+        with_agents: True 时同时注册 ``AgentTool``（暴露给 LLM 派遣子 Agent）。
+            根 ReActAgent 应传 True；子 Agent 的 registry 由
+            ``agents.context.build_subagent_registry`` 重新过滤产出，会自动
+            把 AgentTool 排除（参照 md14 ALL_AGENT_DISALLOWED_TOOLS）。
+        base_llm: 仅在 ``with_agents=True`` 时使用 — 传入根 ``OpenAICompatLLM``
+            实例，供 AgentTool 在派遣子 Agent 时复用其 client/config。
+    """
     reg = ToolRegistry()
 
     # 立即注册的核心工具（轻量、常用）
@@ -474,6 +488,18 @@ def default_tool_registry() -> ToolRegistry:
     except Exception as e:  # 守住启动路径
         import sys
         sys.stderr.write(f"[mcp] 加载 MCP 服务器失败（忽略）：{e}\n")
+
+    # 子 Agent 派遣工具：仅在调用方明确开启时注入。
+    # 延迟导入 agents 子包以避免 tools ↔ agents 循环。
+    if with_agents:
+        if base_llm is None:
+            raise ValueError(
+                "default_tool_registry(with_agents=True) 必须同时传入 base_llm，"
+                "否则 AgentTool 无法实例化子 Agent。"
+            )
+        from agents.agent_tool import AgentTool
+
+        reg.register(AgentTool(reg, base_llm, parent_ctx=None))
 
     return reg
 

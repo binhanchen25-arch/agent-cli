@@ -31,20 +31,21 @@ def set_terminal_title(title: str):
 
 
 def enter_fullscreen():
-    """清屏 + 隐藏光标滚动历史，只显示我们的内容"""
+    """清屏 + 光标回顶。不切备用屏幕缓冲区，
+    让输出进入终端正常滚动历史 —— 用户可以
+    鼠标滚轮 / Cmd+↑↓ 回看历史输出。
+    """
     if os.name == "nt":
         os.system("cls")
     else:
-        # 进入备用屏幕缓冲区（和 vim/less 一样，退出后恢复原终端内容）
-        sys.stdout.write("\033[?1049h\033[H\033[2J")
+        # 只清屏 + 光标回顶，不调 \033[?1049h（不进备用屏）。
+        sys.stdout.write("\033[2J\033[H")
         sys.stdout.flush()
 
 
 def exit_fullscreen():
-    """退出时恢复终端"""
-    if os.name != "nt":
-        sys.stdout.write("\033[?1049l")
-        sys.stdout.flush()
+    """退出时的清理 —— 未切备用屏，无需还原。保留函数以兼容调用点。"""
+    return
 
 
 def print_welcome():
@@ -54,8 +55,8 @@ def print_welcome():
 ╔══════════════════════════════════════════╗
 ║        🤖  MyCLI - 终端 AI 助手         ║
 ║                                          ║
-║  输入问题开始对话，输入 \help 查看帮助   ║
-║  按 Ctrl+C 或输入 \exit 退出            ║
+║  输入问题开始对话，输入 \\help 查看帮助   ║
+║  按 Ctrl+C 或输入 \\exit 退出            ║
 ╚══════════════════════════════════════════╝"""
     console.print(welcome, style="bold blue")
     console.print()
@@ -70,14 +71,28 @@ def print_user_message(text: str):
 def render_stream(stream: Generator[str, None, None]) -> str:
     """
     流式渲染 Markdown，返回完整文本。
-    Ctrl+C 时：关闭底层生成器（触发其 finally 清理）、定格已显示内容、
-    在末尾追加「[已取消]」提示，并把累积的 partial 文本返回给调用方。
+
+    设计要点（解决"上滚出现无限重影"）：
+      - Live 期间限定 ``vertical_overflow="crop"``：任何一帧都不超过当前可视区,
+        Rich 的"上移 N 行擦除"才能命中,不会留下擦不掉的旧帧叠加。
+      - Live 用 ``transient=True``：流结束/被取消时彻底擦除 Live 区域,
+        避免和后续静态面板重复显示。
+      - 流结束后把"完整内容"作为 *普通* ``console.print(Panel(...))`` 再打一次。
+        这条输出会进入终端正常滚动缓冲区,鼠标滚轮 / Cmd+↑↓ 都能回看。
+
+      Ctrl+C 时：关闭底层生成器（触发其 finally 清理）,把已累积的内容
+      标记 ``[已取消]`` 后同样以静态面板形式打印。
     """
     full_text = ""
     console.print()
     cancelled = False
     try:
-        with Live(console=console, refresh_per_second=12, vertical_overflow="visible") as live:
+        with Live(
+            console=console,
+            refresh_per_second=12,
+            vertical_overflow="crop",  # 防溢出留鬼影
+            transient=True,             # Live 结束时擦除原地预览
+        ) as live:
             try:
                 for chunk in stream:
                     full_text += chunk
@@ -99,19 +114,22 @@ def render_stream(stream: Generator[str, None, None]) -> str:
                         close()
                     except Exception:
                         pass
-                # 在已显示内容末尾追加取消标记并定格
-                full_text_with_mark = full_text + "\n\n> ⛔ **[已取消]**"
-                live.update(
-                    Panel(
-                        Markdown(full_text_with_mark),
-                        border_style="yellow",
-                        title="🤖 助手",
-                        title_align="left",
-                        padding=(0, 1),
-                    )
-                )
     finally:
         pass
+
+    # Live 区已擦除 → 把"完整内容"以静态面板形式再打一次,
+    # 这一帧进入终端正常滚动缓冲,可回看。
+    if full_text or cancelled:
+        final_md = full_text + ("\n\n> ⛔ **[已取消]**" if cancelled else "")
+        console.print(
+            Panel(
+                Markdown(final_md),
+                border_style="yellow" if cancelled else "green",
+                title="🤖 助手",
+                title_align="left",
+                padding=(0, 1),
+            )
+        )
     return full_text + ("\n\n[已取消]" if cancelled else "")
 
 
@@ -150,8 +168,8 @@ def clear_screen():
 ╔══════════════════════════════════════════╗
 ║        🤖  MyCLI - 终端 AI 助手         ║
 ║                                          ║
-║  输入问题开始对话，输入 \help 查看帮助   ║
-║  按 Ctrl+C 或输入 \exit 退出            ║
+║  输入问题开始对话，输入 \\help 查看帮助   ║
+║  按 Ctrl+C 或输入 \\exit 退出            ║
 ╚══════════════════════════════════════════╝"""
     console.print(welcome, style="bold blue")
     console.print()

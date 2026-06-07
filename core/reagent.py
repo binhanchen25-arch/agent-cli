@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Callable, Generator, List, Optional
 
 if TYPE_CHECKING:
+    from agents.context import SubagentContext
     from core.llm import OpenAICompatLLM
 
 from core.hooks import get_hook
@@ -30,6 +31,7 @@ AGENT_SYSTEM_PROMPT = """你是 MyCLI 的 ReAct Agent，擅长在终端与代码
 - 可以在同一轮并行调用多个独立工具以提速。
 - 参数必须具体、可执行，避免宽泛或重复查询。
 - 不确定是否存在某个能力时，先用 `tool_search` 按关键词检索；命中的工具会自动进入下一轮可用集合。
+- 若 system 消息里出现 `<available-deferred-tools>` 块，说明里面列出的工具当前不在 schema 中，只有名字和一句话提示；要使用时先调用 `tool_search`（关键词搜索或 `select:工具名` 精确加载）拿到完整参数定义。
 - 每次工具调用都必须显式传入 confirm 参数，由你自主判断：
   · 只读/查询类工具（如 view、grep、glob、tree、web_search、fetch_url、now、echo）→ confirm=false。
   · 高风险/不可逆操作（如 write_file、edit_file、file_ops、windows_cmd、python_repl、create_docx）→ confirm=true。
@@ -62,6 +64,7 @@ class ReActAgent:
         max_steps: int = 20,
         custom_prompt: Optional[str] = None,
         before_step: Optional[BeforeStepHook] = None,
+        parent_ctx: Optional["SubagentContext"] = None,
     ) -> None:
         self.name = name
         self.llm = llm
@@ -70,6 +73,9 @@ class ReActAgent:
         self.system_prompt = custom_prompt or AGENT_SYSTEM_PROMPT
         # 显式传入优先；否则尝试从 ~/.mycli/hooks.py 加载
         self.before_step: Optional[BeforeStepHook] = before_step or get_hook("before_step")
+        # 由 agents.runner.run_agent 注入；根 Agent 为 None。
+        # 用于在工具内（如 AgentTool）判断当前嵌套深度。
+        self.parent_ctx: Optional["SubagentContext"] = parent_ctx
 
     def _build_initial_messages(self, question: str, history: Optional[List[dict]] = None) -> List[dict]:
         """构造 ReAct 初始消息：system + 历史 + 当前问题。"""
@@ -130,10 +136,14 @@ class ReActAgent:
                 # 每轮重算 schema：tool_search 可能在上一轮把新工具加入 discovered。
                 tools_schema = self.tool_registry.get_openai_tools_schema()
 
+                # 每轮临时拼接 deferred 列表到 system prompt。不修改原 messages，
+                # 以便后续在历史中保留纯净的 system 提示。
+                send_messages = self._augment_with_deferred(messages)
+
                 # 真流式调用 LLM
                 final_resp = None
                 tool_calls: List = []
-                inner_stream = self.llm.stream_with_tools(messages, tools_schema)
+                inner_stream = self.llm.stream_with_tools(send_messages, tools_schema)
                 try:
                     for event_type, payload in inner_stream:
                         if event_type == "content":
@@ -276,6 +286,40 @@ class ReActAgent:
                        "或说明为什么需要执行该操作。",
         })
         return self.llm.invoke(messages)
+
+    # ── deferred-tools 提醒 ──
+
+    @staticmethod
+    def _format_deferred_block(deferred: List[dict]) -> str:
+        """组装 ``<available-deferred-tools>`` 提醒块。"""
+        lines = ["<available-deferred-tools>"]
+        for item in deferred:
+            name = item.get("name", "")
+            hint = item.get("hint", "")
+            lines.append(f"- {name}: {hint}" if hint else f"- {name}")
+        lines.append("</available-deferred-tools>")
+        lines.append(
+            "上述工具不在当前 schema 中。需要使用时，先调用 `tool_search`（关键词检索"
+            "或 `select:工具名` 精确加载）拿到参数定义后再调用。"
+        )
+        return "\n".join(lines)
+
+    def _augment_with_deferred(self, messages: List[dict]) -> List[dict]:
+        """返回一个新的 messages 列表：如果存在 deferred 工具，则在首个 system
+        消息末尾拼接 ``<available-deferred-tools>`` 提醒块。原 messages 保持不变。
+        """
+        deferred = self.tool_registry.list_deferred_tools()
+        if not deferred:
+            return messages
+        block = self._format_deferred_block(deferred)
+        if messages and messages[0].get("role") == "system":
+            new_sys = {
+                **messages[0],
+                "content": (messages[0].get("content") or "") + "\n\n" + block,
+            }
+            return [new_sys] + messages[1:]
+        # 没有 system 头（理论上不应该走到这，但作为兑底）
+        return [{"role": "system", "content": block}] + messages
 
 
 class ReActChatLLM:
