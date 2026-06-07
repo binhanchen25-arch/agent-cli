@@ -12,6 +12,8 @@ def init_app():
 
     在这里做一次性的 ``import``，把重型依赖延迟到真正需要 REPL 时才加载。
     """
+    from memory import ensure_cli_memory_structure
     from cli.app import ChatApp
 
+    ensure_cli_memory_structure()
     return ChatApp()

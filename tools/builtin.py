@@ -23,6 +23,7 @@ from tools.fetch_url import FetchUrlTool
 from tools.python_repl import PythonReplTool
 from tools.file_ops import FileOpsTool
 from tools.create_docx import CreateDocxTool
+from tools.memory_tool import MemoryTool
 from tools.confirm import (
     get_allow_all_windows_cmd as _get_allow_all_windows_cmd,
     set_allow_all_windows_cmd as _set_allow_all_windows_cmd,
@@ -460,6 +461,7 @@ def default_tool_registry(
         WriteFileTool(), EditFileTool(), FileOpsTool(),
         FetchUrlTool(),
         PythonReplTool(),
+        MemoryTool(),
     ])
 
     # 可选依赖工具：用懒加载包装，避免 import 时机过早。
