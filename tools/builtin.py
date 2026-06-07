@@ -439,6 +439,7 @@ def default_tool_registry(
     *,
     with_agents: bool = False,
     base_llm: Any = None,
+    config: Any = None,
 ) -> ToolRegistry:
     """构造默认工具注册表。
 
@@ -450,7 +451,7 @@ def default_tool_registry(
         base_llm: 仅在 ``with_agents=True`` 时使用 — 传入根 ``OpenAICompatLLM``
             实例，供 AgentTool 在派遣子 Agent 时复用其 client/config。
     """
-    reg = ToolRegistry()
+    reg = ToolRegistry(config=config)
 
     # 立即注册的核心工具（轻量、常用）
     reg.register_many([

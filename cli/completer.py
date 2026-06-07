@@ -6,6 +6,7 @@ COMMANDS = {
     "/clear": "清空对话历史",
     "/config": "查看当前配置",
     "/allow": "授权控制（/allow 直接开启跳过确认，/allow off 关闭）",
+    "/log": "运行日志控制（/log on, /log off, /log status）",
     "/chat": "切回普通聊天模式（LLM 直接对话）",
     "/normal": "切回普通聊天模式（同 /chat）",
     "/model": "切换模型（如 /model gpt-4）",

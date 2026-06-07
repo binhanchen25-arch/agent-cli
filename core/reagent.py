@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from core.llm import OpenAICompatLLM
 
 from core.hooks import get_hook
+from runtime_log import log_event
 from tools.base import UserRefusedError
 from tools.builtin import default_tool_registry
 from tools.registry import ToolRegistry
@@ -68,7 +69,7 @@ class ReActAgent:
     ) -> None:
         self.name = name
         self.llm = llm
-        self.tool_registry = tool_registry or default_tool_registry()
+        self.tool_registry = tool_registry or default_tool_registry(config=self.llm.config)
         self.max_steps = max_steps
         self.system_prompt = custom_prompt or AGENT_SYSTEM_PROMPT
         # 显式传入优先；否则尝试从 ~/.mycli/hooks.py 加载
@@ -117,12 +118,26 @@ class ReActAgent:
 
         messages = self._build_initial_messages(question, history=history)
         total_calls = 0
+        log_event(
+            self.llm.config,
+            "react_run_started",
+            agent=self.name,
+            question_preview=question[:200],
+            history_messages=len(history or []),
+        )
 
         status_cm = console.status("🤔 Thinking…", spinner="dots")
         status = status_cm.__enter__()
         try:
             for step in range(1, self.max_steps + 1):
                 status.update(f"🤔 Thinking… (step {step}/{self.max_steps})")
+                log_event(
+                    self.llm.config,
+                    "react_step_started",
+                    agent=self.name,
+                    step=step,
+                    message_count=len(messages),
+                )
 
                 # 用户钩子
                 if self.before_step is not None:
@@ -163,10 +178,24 @@ class ReActAgent:
 
                 # 没有工具调用 → LLM 已直接给出最终回答（token 已 yield 完）
                 if not tool_calls:
+                    log_event(
+                        self.llm.config,
+                        "react_run_finished",
+                        agent=self.name,
+                        step=step,
+                        reason="no_tool_calls",
+                    )
                     return
 
                 # 提示用户：模型决定调用工具
                 names = ", ".join(f"`{tc.name}`" for tc in tool_calls)
+                log_event(
+                    self.llm.config,
+                    "react_tool_calls_detected",
+                    agent=self.name,
+                    step=step,
+                    tools=[tc.name for tc in tool_calls],
+                )
                 # yield f"\n\n> 🔧 调用工具：{names}\n\n"
 
                 # 把带 tool_calls 的 assistant 消息追加到历史
@@ -275,6 +304,13 @@ class ReActAgent:
                         })
 
             yield "\n\n抱歉，在限定步数内未能完成任务。"
+            log_event(
+                self.llm.config,
+                "react_run_finished",
+                agent=self.name,
+                reason="max_steps_reached",
+                max_steps=self.max_steps,
+            )
         finally:
             status_cm.__exit__(None, None, None)
 

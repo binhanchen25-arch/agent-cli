@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
+from runtime_log import log_event
 from tools.base import Tool, UserRefusedError
 from tools.confirm import (
     confirm_in_cli,
@@ -39,10 +40,11 @@ class ToolRegistry:
       用于配合 `tool_search` 在工具数量很大时按需展开。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config: Optional[dict] = None) -> None:
         self._tools: Dict[str, Tool] = {}
         self._lazy: Dict[str, _LazyEntry] = {}
         self._discovered: Set[str] = set()
+        self.config = config or {}
         # 关闭钩子：MCP server 等需要在 CLI 退出时清理。
         self._closers: List[Callable[[], None]] = []
 
@@ -332,6 +334,12 @@ class ToolRegistry:
     def _run_with_validation(self, tool: Tool, parameters: Dict[str, Any]) -> str:
         """统一的参数验证 + 执行路径。"""
         cleaned_parameters = strip_confirm_parameter(parameters)
+        log_event(
+            self.config,
+            "tool_started",
+            tool=tool.name,
+            parameters=cleaned_parameters,
+        )
 
         if self._resolve_confirm(tool, parameters):
             detail = (
@@ -340,17 +348,49 @@ class ToolRegistry:
             )
             approved = confirm_in_cli(detail)
             if not approved:
+                log_event(
+                    self.config,
+                    "tool_refused",
+                    tool=tool.name,
+                    parameters=cleaned_parameters,
+                )
                 raise UserRefusedError(tool.name, "用户在确认弹窗中拒绝执行")
 
         if not tool.validate_parameters(cleaned_parameters):
             needed = [p.name for p in tool.get_parameters() if p.required]
+            log_event(
+                self.config,
+                "tool_invalid_parameters",
+                tool=tool.name,
+                provided=list(cleaned_parameters.keys()),
+                required=needed,
+            )
             return (
                 f"参数不完整。工具 `{tool.name}` 需要字段: {needed}。"
                 f"收到: {list(cleaned_parameters.keys())}"
             )
         try:
-            return tool.run(cleaned_parameters)
+            result = tool.run(cleaned_parameters)
+            log_event(
+                self.config,
+                "tool_finished",
+                tool=tool.name,
+                result_preview=str(result)[:200],
+            )
+            return result
         except UserRefusedError:
+            log_event(
+                self.config,
+                "tool_refused",
+                tool=tool.name,
+                parameters=cleaned_parameters,
+            )
             raise
         except Exception as e:
+            log_event(
+                self.config,
+                "tool_failed",
+                tool=tool.name,
+                error=str(e),
+            )
             return f"工具执行错误: {e}"

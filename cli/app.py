@@ -13,6 +13,7 @@ from cli.renderer import (
 from core.config import load_config, save_config, ensure_dirs, HISTORY_FILE
 from core.llm import OpenAICompatLLM, demo_stream
 from core.reagent import ReActAgent, ReActChatLLM
+from runtime_log import get_log_file_path, is_runtime_log_enabled, log_event
 from tools.builtin import default_tool_registry, set_allow_all_windows_cmd
 
 prompt_style = Style.from_dict({
@@ -42,13 +43,19 @@ class ChatApp:
             multiline=False,
         )
 
+    def _log_event(self, event: str, **payload):
+        log_event(self.config, event, **payload)
+
     def handle_command(self, cmd: str) -> bool:
         """处理斜杠命令，返回 True 表示继续，False 表示退出"""
         parts = cmd.strip().split(maxsplit=1)
         command = parts[0].lower()
         args = parts[1] if len(parts) > 1 else ""
 
+        self._log_event("command_received", command=command, args=args)
+
         if command == "/exit":
+            self._log_event("command_exit")
             return False
         elif command == "/help":
             self._show_help()
@@ -68,6 +75,24 @@ class ChatApp:
                 print_system("已关闭 allow：所有工具默认执行前会弹出 Yes/No 确认。")
             else:
                 print_system("用法: /allow  （可选: /allow all, /allow off）")
+        elif command == "/log":
+            log_arg = args.strip().lower()
+            if log_arg in ("on", "enable", "start"):
+                self.config["runtime_log_enabled"] = True
+                save_config(self.config)
+                print_system(f"已开启运行日志：{get_log_file_path(self.config)}")
+                self._log_event("runtime_log_enabled", by_command="/log on")
+            elif log_arg in ("off", "disable", "stop"):
+                self._log_event("runtime_log_disabled", by_command="/log off")
+                self.config["runtime_log_enabled"] = False
+                save_config(self.config)
+                print_system("已关闭运行日志")
+            elif log_arg in ("status", ""):
+                enabled = is_runtime_log_enabled(self.config)
+                status = "开启" if enabled else "关闭"
+                print_system(f"运行日志状态：{status}；文件：{get_log_file_path(self.config)}")
+            else:
+                print_system("用法: /log on | /log off | /log status")
         elif command in ("/chat", "/normal"):
             self.llm = self.base_llm
             print_system("已切换到普通聊天模式（LLM 直接对话）")
@@ -141,7 +166,11 @@ class ChatApp:
         elif command == "/react":
             # /react：把当前 llm 切换成 ReAct agent（包装成与 ChatApp 兼容的 stream/invoke 接口）
             # 默认带 with_agents=True，允许主 Agent 通过 `agent` 工具派遣子 Agent。
-            registry = default_tool_registry(with_agents=True, base_llm=self.base_llm)
+            registry = default_tool_registry(
+                with_agents=True,
+                base_llm=self.base_llm,
+                config=self.config,
+            )
             self.llm = ReActChatLLM(
                 ReActAgent("MyCLI", self.base_llm, tool_registry=registry)
             )
@@ -151,6 +180,7 @@ class ChatApp:
                 print_system("已切换到 ReAct 模式（后续输入将走 ReActAgent；用 /chat 切回普通聊天）")
         else:
             print_error(f"未知命令: {command}，输入 /help 查看帮助")
+            self._log_event("command_unknown", command=command)
 
         return True
 
@@ -173,7 +203,11 @@ class ChatApp:
     def _run_react(self, question: str):
         """ReAct 模式：多步推理 + 工具调用，结果以 Markdown 面板展示。"""
         print_user_message(f"/react {question}")
-        registry = default_tool_registry(with_agents=True, base_llm=self.base_llm)
+        registry = default_tool_registry(
+            with_agents=True,
+            base_llm=self.base_llm,
+            config=self.config,
+        )
         agent = ReActAgent("MyCLI", self.base_llm, tool_registry=registry)
         stream = agent.run_stream(question, history=self.messages)
         answer = render_stream(stream)
@@ -195,6 +229,7 @@ class ChatApp:
     def chat(self, user_input: str):
         """处理一轮对话"""
         self.messages.append({"role": "user", "content": user_input})
+        self._log_event("chat_started", input_preview=user_input[:120], use_demo=self.use_demo)
         # print_user_message(user_input)
 
         if self.use_demo:
@@ -204,6 +239,7 @@ class ChatApp:
 
         reply = render_stream(stream)
         self.messages.append({"role": "assistant", "content": reply})
+        self._log_event("chat_finished", reply_preview=reply[:120], total_messages=len(self.messages))
         self._render_context_usage()
 
     def run(self):
